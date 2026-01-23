@@ -1,0 +1,23 @@
+{
+  "name": "client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.1",
+    "leaflet": "^1.9.4",
+    "pinia": "^3.0.4",
+    "proj4": "^2.20.2",
+    "proj4leaflet": "^1.0.2",
+    "vue": "^3.5.24"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.2.4"
+  }
+}

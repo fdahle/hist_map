@@ -1,0 +1,55 @@
+# ==========================================
+# MAP CONFIGURATION
+# ==========================================
+
+# 1. Map View Settings
+view:
+  center: [51.505, -0.09]  # Latitude, Longitude
+  zoom: 13                 # Starting zoom level (0-18)
+  minZoom: 3
+  maxZoom: 18
+  
+# 2. Coordinate Reference System
+# Options: EPSG3857 (Standard), EPSG4326 (Flat), Simple (Grid)
+crs: "EPSG3857"
+
+# 3. Base Map Layers
+base_layers:
+  - name: "OpenStreetMap"
+    type: "tile"
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+    visible: true
+    attribution: "© OpenStreetMap contributors"
+
+  - name: "Satellite (Esri)"
+    type: "tile"
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+    visible: false
+    attribution: "Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
+
+  - name: "CartoDB Light"
+    type: "tile"
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+    visible: false
+    attribution: "© OpenStreetMap contributors, © CARTO"
+
+  - name: "OpenTopoMap"
+    type: "tile"
+    url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png"
+    visible: false
+    attribution: "Map data: © OpenStreetMap contributors, SRTM | Map style: © OpenTopoMap (CC-BY-SA)"
+
+  # 4. Overlay Layers
+overlay_layers:
+  - name: "London Polys"
+    type: "geojson"
+    url: "http://localhost:3000/input/shapes/polygons.json"
+    visible: true
+  - name: "London Lines"
+    type: "geojson"
+    url: "http://localhost:3000/input/shapes/lines.json"
+    visible: true
+  - name: "London Points"
+    type: "geojson"
+    url: "http://localhost:3000/input/shapes/points.json"
+    visible: false

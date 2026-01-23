@@ -1,0 +1,44 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Kensington Palace",
+        "description": "Historic royal residence in the West Zone",
+        "color": "purple",
+        "population": 400
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-0.188, 51.505]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Bank Junction",
+        "description": "Major intersection in the Finance Hub",
+        "color": "black",
+        "population": 1500
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-0.089, 51.513]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "name": "Royal Festival Hall",
+        "description": "Concert hall in the South Bank area",
+        "color": "yellow",
+        "population": 2500
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-0.116, 51.505]
+      }
+    }
+  ]
+}
