@@ -10,6 +10,7 @@
         :key="layer.id"
         class="layer-row"
         :class="{ active: layer.active }"
+        @contextmenu.prevent="handleRightClick($event, layer)"
       >
         <label>
           <input
@@ -27,9 +28,8 @@
             >
               <circle cx="12" cy="12" r="6" fill="currentColor" />
             </svg>
-
             <svg
-              v-if="getIconType(layer.geometryType) === 'line'"
+              v-else-if="getIconType(layer.geometryType) === 'line'"
               viewBox="0 0 24 24"
               width="16"
               height="16"
@@ -41,31 +41,11 @@
                 fill="none"
               />
             </svg>
-
-            <svg
-              v-if="getIconType(layer.geometryType) === 'polygon'"
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-            >
-              <path
-                d="M12 2 L2 22 L22 22 Z"
-                fill="currentColor"
-                opacity="0.6"
-                stroke="currentColor"
-                stroke-width="2"
-              />
-            </svg>
-
-            <svg
-              v-if="getIconType(layer.geometryType) === 'unknown'"
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-            >
+            <svg v-else viewBox="0 0 24 24" width="16" height="16">
               <rect x="4" y="4" width="16" height="16" rx="2" fill="#ccc" />
             </svg>
           </span>
+
           <span class="layer-name">{{ layer.name }}</span>
         </label>
       </div>
@@ -74,31 +54,92 @@
         No overlay layers loaded.
       </div>
     </div>
+
+    <ContextMenu
+      ref="contextMenuRef"
+      @action="handleMenuAction"
+      @color-change="handleColorChange"
+    />
   </div>
 </template>
 
 <script setup>
-import { storeToRefs } from "pinia"; // <--- Critical Import
+import { ref } from "vue";
+import { storeToRefs } from "pinia";
 import { useLayerStore } from "../stores/layerStore";
+import { useMapStore } from "../stores/mapStore"; // Need map store for Zooming
+import ContextMenu from "./ContextMenu.vue"; // Import the menu
 
 const layerStore = useLayerStore();
+const mapStore = useMapStore();
 
-// 1. Destructure State (needs storeToRefs to be reactive)
 const { layers, overlayLayers } = storeToRefs(layerStore);
-
-// 2. Destructure Actions (functions work directly)
 const { toggleLayer } = layerStore;
 
+const contextMenuRef = ref(null);
+
+// Helper for icons (Same as your code)
 const getIconType = (layerType) => {
-  // Normalize type (handle 'MultiPolygon' as 'Polygon', etc.)
-  const type = layerType?.toLowerCase() || 'unknown';
-  
-  if (type.includes('point')) return 'point';
-  if (type.includes('line')) return 'line';
-  if (type.includes('polygon')) return 'polygon';
-  return 'unknown';
+  const type = layerType?.toLowerCase() || "unknown";
+  if (type.includes("point")) return "point";
+  if (type.includes("line")) return "line";
+  return "unknown";
 };
 
+// --- 1. OPEN MENU ---
+const handleRightClick = (event, layer) => {
+  // Only open if the layer is actually active/visible (optional UX choice)
+  // if (!layer.active) return;
+
+  contextMenuRef.value.open(event, layer);
+};
+
+// --- 2. HANDLE ACTIONS ---
+const handleMenuAction = ({ type, layer }) => {
+  if (!layer.layerInstance) {
+    console.warn("Layer has no map instance");
+    return;
+  }
+
+  // Action: Zoom
+  if (type === "zoom") {
+    const map = mapStore.getMap();
+    if (map) {
+      const bounds = layer.layerInstance.getBounds();
+      if (bounds.isValid()) {
+        map.flyToBounds(bounds, { padding: [50, 50] });
+      }
+    }
+  }
+
+  // Action: Download
+  if (type === "download") {
+    // Convert Leaflet layer back to GeoJSON
+    const geojson = layer.layerInstance.toGeoJSON();
+
+    // Create download link
+    const dataStr =
+      "data:text/json;charset=utf-8," +
+      encodeURIComponent(JSON.stringify(geojson));
+    const el = document.createElement("a");
+    el.setAttribute("href", dataStr);
+    el.setAttribute("download", `${layer.name}.json`);
+    document.body.appendChild(el);
+    el.click();
+    el.remove();
+  }
+};
+
+// --- 3. HANDLE COLOR CHANGE ---
+const handleColorChange = ({ color, layer }) => {
+  if (layer.layerInstance) {
+    // Update Leaflet Map Visuals
+    layer.layerInstance.setStyle({ color: color });
+
+    // Update Store (so the sidebar icon updates too!)
+    layer.color = color;
+  }
+};
 </script>
 
 <style scoped>

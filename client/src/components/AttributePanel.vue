@@ -39,11 +39,6 @@ const filterProps = (props) => {
   const { name, color, ...rest } = props; // Exclude 'name' and 'color' from the table if displayed elsewhere
   return rest;
 };
-
-// Helper to capitalize keys (e.g., "population_density" -> "Population Density")
-const formatKey = (key) => {
-  return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-};
 </script>
 
 <style scoped>
