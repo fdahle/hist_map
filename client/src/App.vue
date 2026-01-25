@@ -44,7 +44,7 @@ provide("config", appConfig);
 
 onMounted(async () => {
   try {
-    const res = await fetch("/config.yaml");
+    const res = await fetch("/config_antarctica.yaml");
     const txt = await res.text();
     appConfig.value = yaml.load(txt);
     isConfigLoaded.value = true;

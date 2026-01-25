@@ -1,0 +1,47 @@
+# ==========================================
+# ANTARCTICA TEST CONFIGURATION
+# ==========================================
+
+# 1. Map View Settings
+view:
+  center: [-90, 0]        # Centered directly on the South Pole
+  zoom: 1                 # Zoom levels differ in polar projections
+  minZoom: 0
+  maxZoom: 16
+  
+# 2. Coordinate Reference System
+# IMPORTANT: This requires Proj4Leaflet and the following definition:
+# "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+crs: "EPSG:3031"
+
+# 3. Base Map Layers (Using GBIF Polar Tiles)
+base_layers:
+  - name: "Antarctic (GBIF Geyser)"
+    type: "tile"
+    url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-geyser"
+    visible: true
+    attribution: "© GBIF, OpenStreetMap contributors"
+
+  - name: "Antarctic (GBIF Classic)"
+    type: "tile"
+    url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-classic"
+    visible: false
+    attribution: "© GBIF, OpenStreetMap contributors"
+
+# 4. Overlay Layers
+# Note: Ensure your local GeoJSON files contain data for Antarctica!
+overlay_layers:
+  - name: "Antarctic Coastlines"
+    type: "geojson"
+    url: "http://localhost:3000/input/shapes/coastline.json"
+    visible: true
+  - name: "Research Stations"
+    type: "geojson"
+    url: "http://localhost:3000/input/shapes/stations.json"
+    visible: true
+    pointType: "marker"
+  - name: "Glaciers"
+    type: "geojson"
+    url: "http://localhost:3000/input/shapes/glaciers.geojson"
+    visible: false
+ 

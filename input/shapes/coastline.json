@@ -1,0 +1,30 @@
+{
+  "type": "FeatureCollection",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:EPSG::3031"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": "coast-01", "name": "Antarctic Landmass Segment" },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[
+          [0.0, 0.0],
+          [0.0, 0.0],
+          [0.0, -3333134.03],
+          [2388932.77, -1379250.98],
+          [2686281.16, 1550925.15],
+          [0.0, 3333134.03],
+          [-2586769.31, 1493471.96],
+          [-2388932.77, -1379250.98],
+          [0.0, -3333134.03],
+          [0.0, 0.0]
+        ]]
+      }
+    }
+  ]
+}

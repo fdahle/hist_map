@@ -5,37 +5,72 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, inject, ref, watch } from "vue"; // <--- Added 'watch'
+import { onMounted, onUnmounted, inject, ref, watch } from "vue";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 // --- IMPORTS ---
-import { useLayerStore } from "../stores/layerStore";
+import { CRS_MAP } from "../constants/crs";
 import { useMapStore } from "../stores/mapStore";
 import { useSelectionStore } from "../stores/selectionStore";
-import { generateUUID } from "../composables/utils"; 
+import { useLayerStore } from "../stores/layerStore";
+import { useLayerManager, createSvgPin } from "../composables/useLayerManager"; // Import createSvgPin
+
+// --- CONFIG & STORES ---
+const configRef = inject("config");
+const config = configRef.value;
+const mapStore = useMapStore();
+const selectionStore = useSelectionStore();
+const layerStore = useLayerStore();
 
 // --- STATE ---
 const mapContainer = ref(null);
 let map = null;
 let resizeObserver = null;
+let layerRegistry = null;
 
-// --- REGISTRY (The missing piece!) ---
-// This acts as a database: "ID -> Leaflet Layer"
-const layerRegistry = {}; 
+/**
+ * Updates the visual style of a Leaflet layer group.
+ * Handles both Vector layers (setStyle) and Markers (setIcon).
+ */
+const applyColorToLeafletLayer = (leafletLayer, newColor) => {
+  if (!leafletLayer || typeof leafletLayer.eachLayer !== "function") return;
 
-// --- CONFIG & STORES ---
-const configRef = inject("config");
-const config = configRef.value;
+  leafletLayer.eachLayer((subLayer) => {
+    // 1. Handle Polygons / Lines / CircleMarkers
+    if (subLayer.setStyle) {
+      subLayer.setStyle({
+        color: newColor,
+        fillColor: newColor,
+        originalColor: newColor,
+        originalFillColor: newColor,
+      });
+    }
 
-const layerStore = useLayerStore();
-const mapStore = useMapStore();
-const selectionStore = useSelectionStore();
+    // 2. Handle Markers (Pins) - THIS WAS THE MISSING PART
+    if (subLayer instanceof L.Marker && subLayer.setIcon) {
+      subLayer.setIcon(createSvgPin(newColor));
+    }
+  });
+};
+
+// This function bridges the Sidebar's event to the Store and Map
+const handleColorChange = ({ color, layer }) => {
+  // 1. Update Pinia Store state (persistence)
+  layerStore.updateLayerColor(layer.id, color);
+
+  // 2. Update Map Visuals immediately
+  applyColorToLeafletLayer(layer.layerInstance, color);
+};
 
 onMounted(async () => {
   if (!mapContainer.value) return;
 
+  // Look up the CRS from our constants using the string from config
+  const selectedCrs = CRS_MAP[config.crs] || L.CRS.EPSG3857;
+
   map = L.map(mapContainer.value, {
+    crs: selectedCrs, // Apply the constant here
     center: config.view.center || [0, 0],
     zoom: config.view.zoom || 2,
     minZoom: config.view.minZoom || 1,
@@ -45,116 +80,56 @@ onMounted(async () => {
 
   mapStore.setMap(map);
 
-  const processLayer = async (layerConf, category) => {
-    let leafletLayer = null;
-    let geometryType = "unknown";
+  const manager = useLayerManager(map);
+  layerRegistry = manager.layerRegistry;
 
-    if (layerConf.type === "tile") {
-      leafletLayer = L.tileLayer(layerConf.url, {
-        attribution: layerConf.attribution,
-        _url: layerConf.url,
-      });
-    }
-
-    else if (layerConf.type === "geojson") {
-      try {
-        const res = await fetch(layerConf.url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-
-        if (data.features && data.features.length > 0) {
-          geometryType = data.features[0].geometry.type;
-        }
-
-        leafletLayer = L.geoJSON(data, {
-          style: {
-            color: layerConf.color || "#3388ff",
-            weight: 2,
-            originalColor: layerConf.color || "#3388ff" // <--- Important: Save original color
-          },
-          onEachFeature: (feature, layer) => {
-            // 1. ENSURE ID
-            if (!feature.properties.id) {
-              feature.properties.id = generateUUID();
-            }
-
-            // 2. REGISTER (Now this works because layerRegistry exists)
-            layerRegistry[feature.properties.id] = layer;
-
-            // 3. TOOLTIP
-            if (feature.properties && feature.properties.name) {
-              layer.bindTooltip(feature.properties.name, {
-                direction: "top",
-                offset: [0, -10],
-                opacity: 0.9,
-                sticky: true,
-              });
-            }
-
-            // 4. CLICK (Cleaned up)
-            layer.on("click", (e) => {
-              L.DomEvent.stopPropagation(e);
-              // We ONLY update the store. The watcher below handles the visual changes.
-              selectionStore.selectFeature(feature);
-            });
-          },
-        });
-      } catch (err) {
-        console.error(`Failed to load GeoJSON: ${layerConf.name}`, err);
-      }
-    }
-
-    if (leafletLayer) {
-      if (layerConf.visible) leafletLayer.addTo(map);
-      layerStore.addLayer(
-        layerConf.name,
-        leafletLayer,
-        layerConf.type,
-        category,
-        layerConf.visible,
-        geometryType,
-        layerConf.color
-      );
-    }
-  };
-
+  const promises = [];
   if (config.base_layers) {
-    for (const layer of config.base_layers) await processLayer(layer, "base");
+    promises.push(
+      ...config.base_layers.map((l) => manager.processLayer(l, "base"))
+    );
   }
   if (config.overlay_layers) {
-    for (const layer of config.overlay_layers) await processLayer(layer, "overlay");
+    promises.push(
+      ...config.overlay_layers.map((l) => manager.processLayer(l, "overlay"))
+    );
   }
+  await Promise.all(promises);
 
-  resizeObserver = new ResizeObserver(() => {
-    map.invalidateSize();
-  });
+  resizeObserver = new ResizeObserver(() => map.invalidateSize());
   resizeObserver.observe(mapContainer.value);
 });
 
-// --- THE WATCHER (Handles Exclusive Selection) ---
+// --- WATCHER (Selection Highlighting) ---
 watch(
   () => selectionStore.selectedFeature,
   (newFeature, oldFeature) => {
-    
-    // 1. Un-highlight Old
-    if (oldFeature && oldFeature.properties.id) {
+    if (!layerRegistry) return;
+
+    if (oldFeature?.properties?.id) {
       const oldLayer = layerRegistry[oldFeature.properties.id];
-      if (oldLayer) {
+      if (oldLayer && oldLayer.setStyle) {
+        // Reset to the current layer color (not just hardcoded blue)
+        const parentLayer = layerStore.layers.find(
+          (l) => l.id === oldFeature.properties.layerId
+        );
+        const baseColor = parentLayer?.color || "#3388ff";
+
         oldLayer.setStyle({
           weight: 2,
-          color: oldLayer.options.originalColor // Restore Blue/Red/Green
+          color: baseColor,
         });
       }
     }
 
-    // 2. Highlight New
-    if (newFeature && newFeature.properties.id) {
+    if (newFeature?.properties?.id) {
       const newLayer = layerRegistry[newFeature.properties.id];
-      if (newLayer) {
+      if (newLayer && newLayer.setStyle) {
         newLayer.setStyle({
           weight: 5,
-          color: '#FFFF00' // Highlight Yellow
+          color: "#FFFF00", // Selection Highlight
         });
+        newLayer.bringToFront();
       }
     }
   }

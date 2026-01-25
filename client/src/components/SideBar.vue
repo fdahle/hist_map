@@ -9,13 +9,24 @@
         v-for="(layer, index) in overlayLayers"
         :key="layer.id"
         class="layer-row"
-        :class="{ active: layer.active }"
+        :class="{ 
+          active: layer.active,
+          'is-loading': layer.progress < 100 
+        }"
         @contextmenu.prevent="handleRightClick($event, layer)"
       >
+        <div v-if="layer.progress < 100" class="progress-bg">
+          <div 
+            class="progress-fill" 
+            :style="{ width: layer.progress + '%' }"
+          ></div>
+        </div>
+
         <label>
           <input
             type="checkbox"
             :checked="layer.active"
+            :disabled="layer.progress < 100"
             @change="toggleLayer(layers.indexOf(layer))"
           />
 
@@ -46,7 +57,12 @@
             </svg>
           </span>
 
-          <span class="layer-name">{{ layer.name }}</span>
+          <span class="layer-name">
+            {{ layer.name }}
+            <small v-if="layer.progress < 100" class="loading-text">
+              ({{ layer.progress }}%)
+            </small>
+          </span>
         </label>
       </div>
 
@@ -67,8 +83,8 @@
 import { ref } from "vue";
 import { storeToRefs } from "pinia";
 import { useLayerStore } from "../stores/layerStore";
-import { useMapStore } from "../stores/mapStore"; // Need map store for Zooming
-import ContextMenu from "./ContextMenu.vue"; // Import the menu
+import { useMapStore } from "../stores/mapStore";
+import ContextMenu from "./ContextMenu.vue";
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
@@ -78,7 +94,6 @@ const { toggleLayer } = layerStore;
 
 const contextMenuRef = ref(null);
 
-// Helper for icons (Same as your code)
 const getIconType = (layerType) => {
   const type = layerType?.toLowerCase() || "unknown";
   if (type.includes("point")) return "point";
@@ -86,22 +101,15 @@ const getIconType = (layerType) => {
   return "unknown";
 };
 
-// --- 1. OPEN MENU ---
 const handleRightClick = (event, layer) => {
-  // Only open if the layer is actually active/visible (optional UX choice)
-  // if (!layer.active) return;
-
+  // Prevent context menu while loading
+  if (layer.progress < 100) return;
   contextMenuRef.value.open(event, layer);
 };
 
-// --- 2. HANDLE ACTIONS ---
 const handleMenuAction = ({ type, layer }) => {
-  if (!layer.layerInstance) {
-    console.warn("Layer has no map instance");
-    return;
-  }
+  if (!layer.layerInstance) return;
 
-  // Action: Zoom
   if (type === "zoom") {
     const map = mapStore.getMap();
     if (map) {
@@ -112,15 +120,9 @@ const handleMenuAction = ({ type, layer }) => {
     }
   }
 
-  // Action: Download
   if (type === "download") {
-    // Convert Leaflet layer back to GeoJSON
     const geojson = layer.layerInstance.toGeoJSON();
-
-    // Create download link
-    const dataStr =
-      "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(geojson));
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(geojson));
     const el = document.createElement("a");
     el.setAttribute("href", dataStr);
     el.setAttribute("download", `${layer.name}.json`);
@@ -130,19 +132,13 @@ const handleMenuAction = ({ type, layer }) => {
   }
 };
 
-// --- 3. HANDLE COLOR CHANGE ---
 const handleColorChange = ({ color, layer }) => {
-  if (layer.layerInstance) {
-    // Update Leaflet Map Visuals
-    layer.layerInstance.setStyle({ color: color });
-
-    // Update Store (so the sidebar icon updates too!)
-    layer.color = color;
-  }
+  layerStore.updateLayerColor(layer.id, color);
 };
 </script>
 
 <style scoped>
+/* Main sidebar setup */
 .sidebar {
   width: 280px;
   height: 100%;
@@ -152,8 +148,8 @@ const handleColorChange = ({ color, layer }) => {
   flex-direction: column;
   box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
   font-family: "Segoe UI", sans-serif;
-  z-index: 2000; /* High z-index to sit on top of map */
-  pointer-events: auto; /* Ensure clicks work */
+  z-index: 2000;
+  pointer-events: auto;
 }
 
 .header {
@@ -175,6 +171,7 @@ const handleColorChange = ({ color, layer }) => {
 }
 
 .layer-row {
+  position: relative; /* Needed for absolute progress bar */
   display: flex;
   align-items: center;
   padding: 8px;
@@ -183,6 +180,7 @@ const handleColorChange = ({ color, layer }) => {
   border: 1px solid #eee;
   border-radius: 4px;
   transition: all 0.2s;
+  overflow: hidden; /* Keep progress bar within rounded corners */
 }
 
 .layer-row:hover {
@@ -193,11 +191,40 @@ const handleColorChange = ({ color, layer }) => {
   border-left: 4px solid #007bff;
 }
 
+/* Progress Bar Styling */
+.progress-bg {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: #e9ecef;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #28a745; /* Green for loading progress */
+  transition: width 0.3s ease;
+}
+
+.loading-text {
+  color: #6c757d;
+  font-size: 11px;
+  margin-left: 5px;
+}
+
+.is-loading {
+  background: #fdfdfd;
+  opacity: 0.8;
+  cursor: wait;
+}
+
 label {
   display: flex;
   align-items: center;
   width: 100%;
   cursor: pointer;
+  z-index: 1; /* Keep text above progress bar background */
 }
 
 .layer-name {
@@ -216,13 +243,16 @@ label {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-left: 8px; /* Space from checkbox */
-  margin-right: 4px; /* Space from text */
+  margin-left: 8px;
+  margin-right: 4px;
   width: 20px;
 }
 
-/* Optional: Make the checkbox slightly smaller if the row feels crowded */
 input[type="checkbox"] {
   cursor: pointer;
+}
+
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
 }
 </style>

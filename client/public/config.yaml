@@ -53,3 +53,4 @@ overlay_layers:
     type: "geojson"
     url: "http://localhost:3000/input/shapes/points.json"
     visible: false
+    pointType: "circle"  # Options: circle, marker

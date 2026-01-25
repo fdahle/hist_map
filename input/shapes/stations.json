@@ -1,0 +1,26 @@
+{
+  "type": "FeatureCollection",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:EPSG::3031"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": "station-01", "name": "Amundsen-Scott South Pole Station", "country": "USA" },
+      "geometry": { "type": "Point", "coordinates": [0.0, 0.0] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "station-02", "name": "McMurdo Station", "country": "USA" },
+      "geometry": { "type": "Point", "coordinates": [1333333.15, -406560.10] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "station-03", "name": "Rothera Research Station", "country": "UK" },
+      "geometry": { "type": "Point", "coordinates": [-2288126.31, 915865.25] }
+    }
+  ]
+}
