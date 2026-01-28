@@ -14,7 +14,8 @@ import { CRS_MAP } from "../constants/crs";
 import { useMapStore } from "../stores/mapStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useLayerStore } from "../stores/layerStore";
-import { useLayerManager, createSvgPin } from "../composables/useLayerManager"; // Import createSvgPin
+import { useLayerManager } from "../composables/useLayerManager"; // Import createSvgPin
+import { createSvgPin } from "../composables/utils";
 
 // --- CONFIG & STORES ---
 const configRef = inject("config");
@@ -71,6 +72,7 @@ onMounted(async () => {
 
   map = L.map(mapContainer.value, {
     crs: selectedCrs, // Apply the constant here
+    renderer: L.canvas(),
     center: config.view.center || [0, 0],
     zoom: config.view.zoom || 2,
     minZoom: config.view.minZoom || 1,

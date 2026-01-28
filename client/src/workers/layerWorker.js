@@ -34,7 +34,7 @@ self.onmessage = async (e) => {
       position += chunk.length;
     }
 
-    // Parse JSON (This is the heavy part!)
+    // Parse JSON
     const geojson = JSON.parse(new TextDecoder("utf-8").decode(allChunks));
 
     // Send the result back

@@ -15,10 +15,12 @@
 
       <div class="map-area">
         <MapWidget />
-        
+
         <div class="bottom-left-control">
           <BaseMapSwitcher />
         </div>
+
+        <InformationBar />
 
         <AttributePanel />
       </div>
@@ -35,13 +37,17 @@ import MapWidget from "./components/MapWidget.vue";
 import SideBar from "./components/SideBar.vue";
 import BaseMapSwitcher from "./components/BaseMapSwitcher.vue";
 import AttributePanel from "./components/AttributePanel.vue"; // <--- 1. Import it
+import InformationBar from "./components/InformationBar.vue"; // <--- 2. Import it
 
+// state variables
 const isConfigLoaded = ref(false);
 const appConfig = ref(null);
 const isSidebarOpen = ref(false);
 
+// provide config to the rest of the app
 provide("config", appConfig);
 
+// load configuration on mount
 onMounted(async () => {
   try {
     const res = await fetch("/config_antarctica.yaml");
@@ -85,7 +91,7 @@ body {
 
 .map-area {
   flex: 1;
-  position: relative; /* <--- This is key. It anchors the absolute children inside */
+  position: relative;
 }
 
 .menu-toggle {

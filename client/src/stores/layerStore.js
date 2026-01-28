@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref, computed } from "vue";
 import { useMapStore } from "./mapStore";
-import { createSvgPin } from "../composables/useLayerManager"; //
+import { createSvgPin } from "../composables/utils";
 
 export const useLayerStore = defineStore("layers", () => {
   const layers = ref([]);
@@ -27,7 +27,7 @@ export const useLayerStore = defineStore("layers", () => {
       layerInstance,
       geometryType: geometryType || "unknown",
       color: color || "#3388ff",
-      progess: 100,
+      progress: 100,
       loading: false,
     });
   };
