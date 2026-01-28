@@ -10,8 +10,6 @@ view:
   maxZoom: 16
   
 # 2. Coordinate Reference System
-# IMPORTANT: This requires Proj4Leaflet and the following definition:
-# "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
 crs: "EPSG:3031"
 
 # 3. Base Map Layers (Using GBIF Polar Tiles)
@@ -33,15 +31,15 @@ base_layers:
 overlay_layers:
   - name: "Antarctic Coastlines"
     type: "geojson"
-    url: "http://localhost:3000/input/shapes/coastline.json"
+    url: "http://localhost:3000/data/processed/coastline.geojson"
     visible: true
   - name: "Research Stations"
     type: "geojson"
-    url: "http://localhost:3000/input/shapes/stations.json"
+    url: "http://localhost:3000/data/processed/stations.json"
     visible: true
     pointType: "marker"
   - name: "Glaciers"
     type: "geojson"
-    url: "http://localhost:3000/input/shapes/glaciers.geojson"
+    url: "http://localhost:3000/data/processed/glaciers.geojson"
     visible: false
  

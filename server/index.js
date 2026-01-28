@@ -1,7 +1,10 @@
 // base code to start the server
-const express = require("express"); // import express
-const path = require('path'); // to handle file paths
-const cors = require('cors'); // to handle CORS issues
+import express from "express"; // import express
+import path from "path"; // to handle file paths
+import cors from "cors"; // to handle CORS issues
+
+import { fileURLToPath } from "url"; // Required to mimic __dirname in ES Modules
+
 const app = express(); // create an Express app
 const PORT = 3000;
 
@@ -16,7 +19,7 @@ const corsOptions = {
 
 // serve input folder as well
 app.use(cors(corsOptions));
-app.use('/input', express.static(path.join(__dirname, '../input')));
+app.use('/data', express.static(path.join(__dirname, 'data')));
 
 // Start the Server
 app.listen(PORT, () => {

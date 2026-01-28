@@ -22,3 +22,10 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# --- Client Specific ---
+client/dist/
+client/.env.local
+
+# --- Server Specific ---
+server/data/

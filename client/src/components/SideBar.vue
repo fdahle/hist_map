@@ -6,31 +6,40 @@
 
     <div class="layer-list">
       <div
-        v-for="(layer, index) in overlayLayers"
+        v-for="layer in overlayLayers"
         :key="layer.id"
         class="layer-row"
-        :class="{ 
+        :class="{
           active: layer.active,
-          'is-loading': layer.progress < 100 
+          'is-loading': layer.progress > 0 && layer.progress < 100,
+          'layer-error': !!layer.error,
         }"
         @contextmenu.prevent="handleRightClick($event, layer)"
       >
-        <div v-if="layer.progress < 100" class="progress-bg">
-          <div 
-            class="progress-fill" 
+        <div
+          v-if="layer.progress > 0 && layer.progress < 100"
+          class="progress-bg"
+        >
+          <div
+            class="progress-fill"
             :style="{ width: layer.progress + '%' }"
           ></div>
         </div>
 
-        <label>
+        <label :class="{ 'disabled-label': !!layer.error }">
           <input
             type="checkbox"
             :checked="layer.active"
-            :disabled="layer.progress < 100"
-            @change="toggleLayer(layers.indexOf(layer))"
+            :disabled="
+              (layer.progress > 0 && layer.progress < 100) || !!layer.error
+            "
+            @change="layerStore.toggleLayer(layer.id)"
           />
 
-          <span class="geom-icon" :style="{ color: layer.color || '#666' }">
+          <span
+            class="geom-icon"
+            :style="{ color: layer.error ? '#ccc' : layer.color || '#666' }"
+          >
             <svg
               v-if="getIconType(layer.geometryType) === 'point'"
               viewBox="0 0 24 24"
@@ -53,16 +62,35 @@
               />
             </svg>
             <svg v-else viewBox="0 0 24 24" width="16" height="16">
-              <rect x="4" y="4" width="16" height="16" rx="2" fill="#ccc" />
+              <rect
+                x="4"
+                y="4"
+                width="16"
+                height="16"
+                rx="2"
+                fill="currentColor"
+                opacity="0.5"
+              />
             </svg>
           </span>
 
-          <span class="layer-name">
-            {{ layer.name }}
-            <small v-if="layer.progress < 100" class="loading-text">
-              ({{ layer.progress }}%)
-            </small>
-          </span>
+          <div class="layer-title-content">
+            <span
+              class="layer-name-text"
+              :style="{ color: layer.error ? '#888' : 'inherit' }"
+            >
+              {{ layer.name }}
+              <small
+                v-if="layer.progress > 0 && layer.progress < 100"
+                class="loading-text"
+              >
+                ({{ layer.progress }}%)
+              </small>
+            </span>
+            <span v-if="layer.error" class="error-icon" :title="layer.error">
+              ⚠️
+            </span>
+          </div>
         </label>
       </div>
 
@@ -90,7 +118,6 @@ const layerStore = useLayerStore();
 const mapStore = useMapStore();
 
 const { layers, overlayLayers } = storeToRefs(layerStore);
-const { toggleLayer } = layerStore;
 
 const contextMenuRef = ref(null);
 
@@ -102,8 +129,7 @@ const getIconType = (layerType) => {
 };
 
 const handleRightClick = (event, layer) => {
-  // Prevent context menu while loading
-  if (layer.progress < 100) return;
+  if (layer.progress < 100 || !!layer.error) return;
   contextMenuRef.value.open(event, layer);
 };
 
@@ -122,7 +148,9 @@ const handleMenuAction = ({ type, layer }) => {
 
   if (type === "download") {
     const geojson = layer.layerInstance.toGeoJSON();
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(geojson));
+    const dataStr =
+      "data:text/json;charset=utf-8," +
+      encodeURIComponent(JSON.stringify(geojson));
     const el = document.createElement("a");
     el.setAttribute("href", dataStr);
     el.setAttribute("download", `${layer.name}.json`);
@@ -138,7 +166,6 @@ const handleColorChange = ({ color, layer }) => {
 </script>
 
 <style scoped>
-/* Main sidebar setup */
 .sidebar {
   width: 280px;
   height: 100%;
@@ -171,7 +198,7 @@ const handleColorChange = ({ color, layer }) => {
 }
 
 .layer-row {
-  position: relative; /* Needed for absolute progress bar */
+  position: relative;
   display: flex;
   align-items: center;
   padding: 8px;
@@ -180,10 +207,10 @@ const handleColorChange = ({ color, layer }) => {
   border: 1px solid #eee;
   border-radius: 4px;
   transition: all 0.2s;
-  overflow: hidden; /* Keep progress bar within rounded corners */
+  overflow: hidden;
 }
 
-.layer-row:hover {
+.layer-row:hover:not(.layer-error) {
   background: #f1f1f1;
 }
 
@@ -191,7 +218,6 @@ const handleColorChange = ({ color, layer }) => {
   border-left: 4px solid #007bff;
 }
 
-/* Progress Bar Styling */
 .progress-bg {
   position: absolute;
   bottom: 0;
@@ -203,7 +229,7 @@ const handleColorChange = ({ color, layer }) => {
 
 .progress-fill {
   height: 100%;
-  background: #28a745; /* Green for loading progress */
+  background: #28a745;
   transition: width 0.3s ease;
 }
 
@@ -224,12 +250,40 @@ label {
   align-items: center;
   width: 100%;
   cursor: pointer;
-  z-index: 1; /* Keep text above progress bar background */
+  z-index: 1;
 }
 
-.layer-name {
+/* Container for text and icon */
+.layer-title-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
   margin-left: 10px;
+}
+
+.layer-name-text {
   font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.layer-error {
+  background: #fdf2f2 !important;
+  border: 1px solid #fababa !important;
+  cursor: not-allowed;
+}
+
+.disabled-label {
+  cursor: not-allowed;
+}
+
+.error-icon {
+  color: #ff4444;
+  margin-left: 8px;
+  cursor: help;
+  flex-shrink: 0;
 }
 
 .empty-state {
@@ -246,10 +300,12 @@ label {
   margin-left: 8px;
   margin-right: 4px;
   width: 20px;
+  flex-shrink: 0;
 }
 
 input[type="checkbox"] {
   cursor: pointer;
+  flex-shrink: 0;
 }
 
 input[type="checkbox"]:disabled {

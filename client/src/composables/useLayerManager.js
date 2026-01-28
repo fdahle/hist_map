@@ -1,3 +1,4 @@
+// client/src/composables/useLayerManager.js
 import L from "leaflet";
 import { useLayerStore } from "../stores/layerStore";
 import { useSelectionStore } from "../stores/selectionStore";
@@ -9,18 +10,15 @@ export function useLayerManager(map) {
   const layerRegistry = {};
 
   const processLayer = async (layerConf, category) => {
-    if (__APP_DEBUG__)
-      console.debug(
-        `[LayerManager] Processing ${category} layer:`,
-        layerConf.name,
-      );
+    // Prioritize config ID, otherwise generate one (fallback)
+    const layerId = layerConf._id || generateUUID();
 
     if (layerConf.type === "tile") {
-      // Tile layers are already handled efficiently by Leaflet
       const leafletLayer = L.tileLayer(layerConf.url, {
         attribution: layerConf.attribution,
       });
       layerStore.addLayer(
+        layerId,
         layerConf.name,
         leafletLayer,
         "tile",
@@ -28,9 +26,12 @@ export function useLayerManager(map) {
         layerConf.visible,
       );
       return;
-    } else if (layerConf.type === "geojson") {
-      // 1. Initial store entry for UI feedback
+    }
+
+    if (layerConf.type === "geojson") {
+      // 1. Initial store entry (shows up in Sidebar immediately)
       layerStore.addLayer(
+        layerId,
         layerConf.name,
         null,
         "geojson",
@@ -40,44 +41,36 @@ export function useLayerManager(map) {
         layerConf.color,
       );
 
-      // 2. Initialize Worker
-      // Note: If using Vite, use: new Worker(new URL('../workers/layerWorker.js', import.meta.url))
-      if (__APP_DEBUG__) {
-        console.debug(
-          `[LayerManager] Starting worker for layer: ${layerConf.name}`,
-        );
-      }
+      // 2. Start Worker
       const worker = new Worker(
         new URL("../workers/layerWorker.js", import.meta.url),
         { type: "module" },
       );
-
-      worker.postMessage({ url: layerConf.url, layerName: layerConf.name });
+      worker.postMessage({ url: layerConf.url, _id: layerId });
 
       worker.onmessage = (e) => {
         const { type, progress, data, error } = e.data;
 
         if (type === "PROGRESS") {
-          layerStore.setLayerProgress(layerConf.name, progress);
+          layerStore.setLayerProgress(layerId, progress);
         } else if (type === "SUCCESS") {
-          finalizeGeoJsonLayer(data, layerConf, category);
-          worker.terminate(); // Clean up worker
+          finalizeGeoJsonLayer(data, layerConf, category, layerId);
+          worker.terminate();
         } else if (type === "ERROR") {
-          console.error(`Worker error loading ${layerConf.name}:`, error);
+          console.error(
+            `[LayerManager] Error loading ${layerConf.name}:`,
+            error,
+          );
+          layerStore.setLayerError(layerId, error || "Failed to fetch file");
           worker.terminate();
         }
       };
-    } else {
-      console.warn(
-        `Unsupported layer type: ${layerConf.type} for layer ${layerConf.name}`,
-      );
     }
   };
 
-  const finalizeGeoJsonLayer = async (data, layerConf, category) => {
+  const finalizeGeoJsonLayer = async (data, layerConf, category, layerId) => {
     const geometryType = data.features?.[0]?.geometry?.type || "Unknown";
 
-    // 1. Create an empty GeoJSON layer container
     const leafletLayer = L.geoJSON(null, {
       coordsToLatLng: (coords) => {
         const crs = map.options.crs;
@@ -97,9 +90,9 @@ export function useLayerManager(map) {
         });
       },
       onEachFeature: (feature, layer) => {
-        if (!feature.properties.id) feature.properties.id = generateUUID();
-        // Tag the feature with its parent layer ID for the selection watcher
-        feature.properties.layerId = layerConf.name;
+        if (!feature.properties._id) feature.properties._id = generateUUID();
+
+        feature.properties.layerId = layerId; // Use stable layerId
         layerRegistry[feature.properties.id] = layer;
         layer.on("click", (e) => {
           L.DomEvent.stopPropagation(e);
@@ -108,43 +101,36 @@ export function useLayerManager(map) {
       },
     });
 
-    // 2. Add the empty container to the map immediately
-    const storeLayer = layerStore.layers.find((l) => l.id === layerConf.name);
+    // Link leaflet instance back to store
+    const storeLayer = layerStore.layers.find((l) => l.id === layerId);
     if (storeLayer) {
       storeLayer.layerInstance = leafletLayer;
       storeLayer.geometryType = geometryType;
       if (storeLayer.active) leafletLayer.addTo(map);
     }
 
-    // 3. Batch processing logic
+    // Batch processing
     const features = data.features;
-    const batchSize = 100; // Adjust this: smaller = smoother but slower load
+    const batchSize = 100;
     let index = 0;
 
     const processBatch = () => {
       const end = Math.min(index + batchSize, features.length);
-      const chunk = features.slice(index, end);
-
-      leafletLayer.addData(chunk); // Add the chunk to the existing layer
+      leafletLayer.addData(features.slice(index, end));
       index = end;
 
-      // Update progress in the store based on processing, not just downloading
-      const currentProgress = Math.round((index / features.length) * 100);
-      layerStore.setLayerProgress(layerConf.name, currentProgress);
+      layerStore.setLayerProgress(
+        layerId,
+        Math.round((index / features.length) * 100),
+      );
 
       if (index < features.length) {
-        // Small timeout allows the UI to remain responsive
         setTimeout(processBatch, 0);
       } else {
         if (storeLayer) storeLayer.progress = 100;
-        if (__APP_DEBUG__)
-          console.log(
-            `[LayerManager] Finished batch loading: ${layerConf.name}`,
-          );
       }
     };
 
-    // Start the first batch
     processBatch();
   };
 
