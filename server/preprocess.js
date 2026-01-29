@@ -1,104 +1,205 @@
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import * as shapefile from "shapefile"; //
+import * as shapefile from "shapefile";
 import * as turf from "@turf/turf";
+import proj4 from "proj4";
+import { reproject } from "reproject";
+import epsg from "epsg-index/all.json" with { type: "json" };
+import { parse } from "csv-parse/sync";
 
-// --- CONFIGURATION ---
-const CONFIG = {
-  // 1. SIMPLIFICATION
-  // Higher = simpler geometry (fewer points).
-  // 0.001 is very conservative, 0.1 is aggressive. Start with 0.01.
-  simplifyTolerance: 10,
-
-  // 2. PRECISION
-  // How many decimal places to keep.
-  // For EPSG:3031 (meters), '0' (integers) is usually precise enough (1 meter accuracy).
-  coordinatePrecision: 0,
-};
-
+// define input/output directories
 const INPUT_DIR = path.resolve("../input");
 const OUTPUT_DIR = path.resolve("data");
 
+// global config
+const CONFIG = {
+  targetCrs: "EPSG:3031",
+  simplifyTolerance: 50,
+  coordinatePrecision: 0,
+};
+
+// Load the mapping config
+const MAPPING_PATH = path.join(INPUT_DIR, "input_config.json");
+const MAPPING = fs.existsSync(MAPPING_PATH)
+  ? JSON.parse(fs.readFileSync(MAPPING_PATH, "utf-8"))
+  : {};
+
+console.log("TODO: CRS MUST BE CHANGED IN PROPERTIES");
+
 const processShapes = async () => {
-  // set path to shapes directory
   const shapeDir = path.join(INPUT_DIR, "shapes");
 
-  // get all files in the shapes directory
+  // 1. Updated filter to include .shp
   const files = fs
     .readdirSync(shapeDir)
-    .filter((f) => f.endsWith(".json") || f.endsWith(".geojson"));
+    .filter(
+      (f) =>
+        f.endsWith(".json") || f.endsWith(".geojson") || f.endsWith(".shp"),
+    );
 
-  // process each file
   for (const file of files) {
     const filePath = path.join(shapeDir, file);
+    // Construct the key as it appears in mapping.json (e.g., "shapes/file.json")
+    const mappingKey = `shapes/${file}`;
+    const fileConfig = MAPPING[mappingKey];
+
+    // init geojson variable that will be populated
     let geojson = null;
 
-    // handle json/geojson files
+    // parse json/geojson files
     if (file.endsWith(".json") || file.endsWith(".geojson")) {
       console.log(`Processing GeoJSON file: ${file}`);
-      const rawData = fs.readFileSync(filePath);
-      geojson = JSON.parse(rawData);
-    }
+      geojson = JSON.parse(fs.readFileSync(filePath));
 
-    // handle shapefiles
-    else if (file.endsWith(".shp")) {
+      // parse shapefiles
+    } else if (file.endsWith(".shp")) {
       console.log(`Processing Shapefile: ${file}`);
-      // convert shapefile to geojson
       geojson = await shapefile.read(filePath);
     }
 
+    // Proceed only if the geojson variable is populated
     if (geojson) {
-      // simply geometry
-      try {
-        console.log(
-          `  - Simplifying (tolerance: ${CONFIG.simplifyTolerance})...`,
-        );
-        geojson = turf.simplify(geojson, {
-          tolerance: CONFIG.simplifyTolerance,
-          highQuality: true, // Takes longer but better results
-          mutate: true, // Updates object in place
-        });
-      } catch (err) {
-        console.warn("  ! Simplification failed, skipping step.", err);
-      }
-
-      // 2. truncate Coordinates (Reduce precision)
-      console.log(
-        `  - Truncating coordinates to ${CONFIG.coordinatePrecision} decimals...`,
-      );
-      geojson = turf.truncate(geojson, {
-        precision: CONFIG.coordinatePrecision,
-        coordinates: 2, // Remove 'z' (elevation) coordinates if they exist
-        mutate: true,
-      });
-
-      // create a unique layer ID
-      const layerId = uuidv4();
-      geojson._layer_id = layerId;
-
-      // ensure data is a FeatureCollection
+      // Ensure FeatureCollection
       if (geojson.type === "Feature") {
         geojson = { type: "FeatureCollection", features: [geojson] };
       }
 
-      // add unique IDs to features if missing
+      // 2. CRS Detection & Reprojection
+      const sourceCrs = detectCrs(geojson);
+      if (sourceCrs !== CONFIG.targetCrs) {
+        console.log(
+          `  - Reprojecting from ${sourceCrs} to ${CONFIG.targetCrs}...`,
+        );
+        const fromDef = epsg[sourceCrs.split(":")[1]]?.proj4 || sourceCrs;
+        const toDef =
+          epsg[CONFIG.targetCrs.split(":")[1]]?.proj4 || CONFIG.targetCrs;
+        try {
+          // perform reprojection
+          geojson = reproject(geojson, fromDef, toDef, epsg);
+
+          // catch reprojection errors
+        } catch (err) {
+          console.error(`  ! Reprojection failed: ${err.message}`);
+        }
+      }
+
+      // 3. Attribute Joining Logic
+      let csvLookup = null;
+      if (fileConfig?.attributes) {
+        console.log(
+          `  - Joining attributes from ${fileConfig.attributes.attributesFile}...`,
+        );
+        csvLookup = loadCsvLookup(
+          fileConfig.attributes.attributesFile,
+          fileConfig.attributes.attributesKey,
+          fileConfig.attributes.attributesDelimiter,
+        );
+      }
+
+      // 4. Feature Processing Loop
       geojson.features = geojson.features.map((feature) => {
         if (!feature.properties) feature.properties = {};
+
+        // A. Apply Join
+        if (csvLookup && fileConfig.attributes.ownKey) {
+          const val = feature.properties[fileConfig.attributes.ownKey];
+          const match = csvLookup.get(String(val));
+          if (match) {
+            feature.properties = { ...feature.properties, ...match };
+          }
+        }
+
+        // B. Apply Thumbnails
+        if (fileConfig?.metadata?.hasThumbnails) {
+          let thumbUrl = fileConfig.metadata.thumbnailTemplate;
+          // Replace all {property_name} in template with actual values
+          const placeholders = thumbUrl.match(/{([^}]+)}/g) || [];
+          placeholders.forEach((p) => {
+            const key = p.replace(/{|}/g, "");
+            thumbUrl = thumbUrl.replace(p, feature.properties[key] || "");
+          });
+          feature.properties._thumbnail_url = thumbUrl;
+        }
+
+        // C. Simplify
+        try {
+          feature = turf.simplify(feature, {
+            tolerance: CONFIG.simplifyTolerance,
+            highQuality: true,
+            mutate: false,
+          });
+        } catch (e) {
+          /* keep original on fail */
+        }
+
         feature.properties._id = uuidv4();
         return feature;
       });
 
-      const outputName = file.split(".")[0] + ".geojson";
+      // 5. Truncate Coordinate precision
+      geojson = turf.truncate(geojson, {
+        precision: CONFIG.coordinatePrecision,
+        mutate: true,
+      });
+
+      // set some metadata
+      geojson._layer_id = uuidv4();
+      if (fileConfig?.metadata) geojson.metadata = fileConfig.metadata;
+      if (geojson.crs) delete geojson.crs;
+      geojson.crs = {
+        type: "name",
+        properties: {
+          name: `urn:ogc:def:crs:EPSG::${CONFIG.targetCrs.split(":")[1]}`,
+        },
+      };
+
+      // Reorder object: Put CRS at the top manually
+      const orderedGeojson = {
+        crs: geojson.crs,
+        ...geojson,
+      };
+
+      // 6. Write Output GeoJSON
+      const outputName = file.replace(/\.[^/.]+$/, "") + ".geojson";
       fs.writeFileSync(
         path.join(OUTPUT_DIR, outputName),
-        JSON.stringify(geojson),
+        JSON.stringify(orderedGeojson),
       );
-      console.log(`Successfully saved processed file: ${outputName}`);
+      console.log(`  Successfully saved: ${outputName}`);
+    } else {
+      console.warn(`  ! Skipping file due to unsupported format: ${file}`);
     }
   }
 };
 
-processShapes().catch((err) => {
-  console.error("Error processing shapes:", err);
-});
+// Helper to load CSV into a Map for fast lookup
+const loadCsvLookup = (relativeCsvPath, keyColumn, delimiter = ",") => {
+  const fullPath = path.resolve(INPUT_DIR, relativeCsvPath);
+  if (!fs.existsSync(fullPath)) {
+    console.warn(`  ! CSV file not found: ${fullPath}`);
+    return null;
+  }
+  const rawCsv = fs.readFileSync(fullPath, "utf-8");
+  const records = parse(rawCsv, {
+    columns: true,
+    skip_empty_lines: true,
+    delimiter: delimiter,
+  });
+  const lookup = new Map();
+  records.forEach((row) => lookup.set(String(row[keyColumn]), row));
+  return lookup;
+};
+
+// Helper to detect CRS from GeoJSON
+const detectCrs = (geojson) => {
+  if (geojson.crs?.properties?.name) {
+    const name = geojson.crs.properties.name;
+    if (name.includes("CRS84")) return "EPSG:4326";
+    const match = name.match(/EPSG::?(\d+)/);
+    return match ? `EPSG:${match[1]}` : name;
+  }
+  return "EPSG:4326";
+};
+
+processShapes().catch(console.error);

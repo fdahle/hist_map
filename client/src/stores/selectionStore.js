@@ -1,15 +1,17 @@
-import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { defineStore } from "pinia";
+import { ref } from "vue";
 
-export const useSelectionStore = defineStore('selection', () => {
+export const useSelectionStore = defineStore("selection", () => {
   const selectedFeature = ref(null);
 
   // We save the WHOLE feature so the sidebar can display attributes
   function selectFeature(feature) {
-    console.log(feature)
-    // If clicking the same thing twice, maybe deselect it? (Optional)
-    if (selectedFeature.value && selectedFeature.value.properties.id === feature.properties.id) {
-      // selectedFeature.value = null; // Uncomment if you want toggle behavior
+    if (
+      selectedFeature.value &&
+      selectedFeature.value.properties._id === feature.properties._id
+    ) {
+      // If clicking the same thing twice, deselect it
+      selectedFeature.value = null;
     } else {
       selectedFeature.value = feature;
     }

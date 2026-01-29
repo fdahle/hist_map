@@ -17,7 +17,7 @@
         @contextmenu.prevent="handleRightClick($event, layer)"
       >
         <div
-          v-if="['downloading', 'processing'].includes(layer.status)"
+          v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
           class="progress-bg"
         >
           <div
@@ -32,14 +32,14 @@
             type="checkbox"
             :checked="layer.active"
             :disabled="
-              ['downloading', 'processing', 'error'].includes(layer.status)
+              ['downloading', 'processing', 'error', 'loading-details'].includes(layer.status)
             "
             @change="layerStore.toggleLayer(layer.id)"
           />
 
           <span class="icon-container">
             <div
-              v-if="['downloading', 'processing'].includes(layer.status)"
+              v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
               class="spinner"
             ></div>
 
@@ -102,14 +102,34 @@
               >
                 (Proc {{ layer.progress }}%)
               </small>
+              <small
+                v-else-if="layer.status === 'loading-details'"
+                class="loading-text"
+              >
+                (Loading {{ layer.progress }}%)
+              </small>
             </span>
-            <span
-              v-if="layer.status === 'error'"
-              class="error-icon"
-              :title="layer.error"
-            >
-              ⚠️
-            </span>
+            
+            <!-- ADDED: Action buttons for error and loading states -->
+            <div class="action-buttons">
+              <button
+                v-if="layer.status === 'error'"
+                class="action-btn retry-btn"
+                :title="layer.error || 'Click to retry'"
+                @click.stop="handleRetry(layer.id)"
+              >
+                🔄
+              </button>
+              
+              <button
+                v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
+                class="action-btn cancel-btn"
+                title="Cancel loading"
+                @click.stop="handleCancel(layer.id)"
+              >
+                ✕
+              </button>
+            </div>
           </div>
         </label>
       </div>
@@ -181,6 +201,16 @@ const handleMenuAction = ({ type, layer }) => {
 
 const handleColorChange = ({ color, layer }) => {
   layerStore.updateLayerColor(layer.id, color);
+};
+
+// ADDED: Retry handler
+const handleRetry = (layerId) => {
+  layerStore.retryLayer(layerId);
+};
+
+// ADDED: Cancel handler
+const handleCancel = (layerId) => {
+  layerStore.cancelLayerLoad(layerId);
 };
 </script>
 
@@ -265,6 +295,10 @@ const handleColorChange = ({ color, layer }) => {
   background: #28a745; /* Green for processing */
 }
 
+.progress-fill.loading-details {
+  background: #ffc107; /* Yellow for loading details */
+}
+
 .loading-text {
   color: #6c757d;
   font-size: 11px;
@@ -292,6 +326,7 @@ label {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
 }
 
 .layer-error {
@@ -304,11 +339,36 @@ label {
   cursor: not-allowed;
 }
 
-.error-icon {
-  color: #ff4444;
+/* ADDED: Action buttons styling */
+.action-buttons {
+  display: flex;
+  gap: 4px;
   margin-left: 8px;
-  cursor: help;
   flex-shrink: 0;
+}
+
+.action-btn {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 14px;
+  border-radius: 3px;
+  transition: background-color 0.2s;
+  line-height: 1;
+}
+
+.retry-btn:hover {
+  background-color: #e3f2fd;
+}
+
+.cancel-btn:hover {
+  background-color: #ffebee;
+}
+
+.cancel-btn {
+  color: #f44336;
+  font-weight: bold;
 }
 
 .empty-state {

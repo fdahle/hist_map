@@ -31,6 +31,10 @@ base_layers:
 # 4. Overlay Layers
 # Note: Ensure your local GeoJSON files contain data for Antarctica!
 overlay_layers:
+  - name: "Georef Sat"
+    type: "geojson"
+    url: "http://localhost:3000/data/georef_sat.geojson"
+    visible: true
   - name: "Antarctic Coastlines"
     type: "geojson"
     url: "http://localhost:3000/data/coastline.geojson"

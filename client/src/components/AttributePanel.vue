@@ -7,13 +7,24 @@
       </div>
 
       <div class="panel-content">
+        <div
+          v-if="selectedFeature.properties._thumbnail_url"
+          class="thumbnail-wrapper"
+        >
+          <img
+            :src="selectedFeature.properties._thumbnail_url"
+            alt="Feature Thumbnail"
+            class="feature-thumbnail"
+          />
+        </div>
+
         <h2 class="feature-title">
-          {{ selectedFeature.properties.name || 'Unnamed Feature' }}
+          {{ selectedFeature.properties.name || "Unnamed Feature" }}
         </h2>
 
         <table class="attr-table">
           <tbody>
-            <tr v-for="(value, key) in filterProps(selectedFeature.properties)" :key="key">
+            <tr v-for="(value, key) in displayProperties" :key="key">
               <td class="key">{{ formatKey(key) }}</td>
               <td class="value">{{ value }}</td>
             </tr>
@@ -25,20 +36,34 @@
 </template>
 
 <script setup>
-import { storeToRefs } from 'pinia';
-import { useSelectionStore } from '../stores/selectionStore';
-
+import { computed } from "vue"; // Import computed
+import { storeToRefs } from "pinia";
+import { useSelectionStore } from "../stores/selectionStore";
 import { formatKey } from "../composables/utils";
 
 const selectionStore = useSelectionStore();
 const { selectedFeature } = storeToRefs(selectionStore);
 const { clearSelection } = selectionStore;
 
-// Helper to ignore internal properties or specific keys you don't want to show
-const filterProps = (props) => {
-  const { name, color, ...rest } = props; // Exclude 'name' and 'color' from the table if displayed elsewhere
-  return rest;
-};
+// 2. Computed property to handle all filtering logic
+const displayProperties = computed(() => {
+  if (!selectedFeature.value?.properties) return {};
+
+  const props = selectedFeature.value.properties;
+
+  return Object.keys(props)
+    .filter((key) => {
+      // Exclude keys starting with _
+      if (key.startsWith("_")) return false;
+      // Exclude specific display keys
+      if (["name", "color"].includes(key)) return false;
+      return true;
+    })
+    .reduce((obj, key) => {
+      obj[key] = props[key];
+      return obj;
+    }, {});
+});
 </script>
 
 <style scoped>
@@ -49,7 +74,7 @@ const filterProps = (props) => {
   width: 300px;
   height: 100%;
   background: white;
-  box-shadow: -2px 0 5px rgba(0,0,0,0.1);
+  box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
   z-index: 2000;
   display: flex;
   flex-direction: column;
@@ -75,6 +100,26 @@ const filterProps = (props) => {
 .panel-content {
   padding: 20px;
   overflow-y: auto;
+}
+
+.thumbnail-wrapper {
+  width: 100%;
+  max-width: 250px;
+  margin-bottom: 15px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #f8f9fa;
+  aspect-ratio: 1 / 1; /* Keeps height consistent while loading */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.feature-thumbnail {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 1px solid #eee;
 }
 
 .feature-title {

@@ -29,6 +29,7 @@ const mapContainer = ref(null);
 let map = null;
 let resizeObserver = null;
 let layerRegistry = null;
+let layerManagerCleanup = null; // ADDED: Store cleanup function
 
 /**
  * Updates the visual style of a Leaflet layer group.
@@ -72,7 +73,7 @@ onMounted(async () => {
 
   map = L.map(mapContainer.value, {
     crs: selectedCrs, // Apply the constant here
-    renderer: L.canvas(),
+    renderer: L.canvas({tolerance: 5}),
     center: config.view.center || [0, 0],
     zoom: config.view.zoom || 2,
     minZoom: config.view.minZoom || 1,
@@ -84,6 +85,7 @@ onMounted(async () => {
 
   const manager = useLayerManager(map);
   layerRegistry = manager.layerRegistry;
+  layerManagerCleanup = manager.cleanup; // ADDED: Store cleanup function
 
   const promises = [];
   if (config.base_layers) {
@@ -108,12 +110,13 @@ watch(
   (newFeature, oldFeature) => {
     if (!layerRegistry) return;
 
-    if (oldFeature?.properties?.id) {
-      const oldLayer = layerRegistry[oldFeature.properties.id];
+    // FIXED: Use _id instead of id
+    if (oldFeature?.properties?._id) {
+      const oldLayer = layerRegistry[oldFeature.properties._id];
       if (oldLayer && oldLayer.setStyle) {
         // Reset to the current layer color (not just hardcoded blue)
         const parentLayer = layerStore.layers.find(
-          (l) => l.id === oldFeature.properties.layerId
+          (l) => l.id === oldFeature.properties._layerId
         );
         const baseColor = parentLayer?.color || "#3388ff";
 
@@ -124,8 +127,9 @@ watch(
       }
     }
 
-    if (newFeature?.properties?.id) {
-      const newLayer = layerRegistry[newFeature.properties.id];
+    // FIXED: Use _id instead of id
+    if (newFeature?.properties?._id) {
+      const newLayer = layerRegistry[newFeature.properties._id];
       if (newLayer && newLayer.setStyle) {
         newLayer.setStyle({
           weight: 5,
@@ -138,15 +142,19 @@ watch(
 );
 
 onUnmounted(() => {
+  // ADDED: Cleanup workers first
+  if (layerManagerCleanup) {
+    layerManagerCleanup();
+  }
+
   // disconnect resize observer
   if (resizeObserver) resizeObserver.disconnect();
 
   // reset layers
-  layerStore.reset()
+  layerStore.reset();
 
   // remove map
   if (map) map.remove();
-
 });
 </script>
 
