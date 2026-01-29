@@ -4,6 +4,10 @@
       "hasThumbnails": true,
       "thumbnailTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/thumb/CA{tma_number}/CA{tma_number}32V/{image_id}_thumbnail.jpg",
       "headerAttribute": "image_id"
+      "hasDownloadLinks": true,
+      "downloadLinkTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/full/CA{tma_number}/CA{tma_number}32V/{image_id}.tif",
+      "has3DModels": true,
+      
     },
     "attributes": {
       "attributesFile": "attributes/images.csv",
