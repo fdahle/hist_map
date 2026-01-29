@@ -74,7 +74,7 @@ const featureTitle = computed(() => {
   const props = selectedFeature.value?.properties;
   if (!props?._layerId) return null;
 
-  const layer = layerStore.layers.find((l) => l.layerId === props._layerId);
+  const layer = layerStore.layers.find((l) => l._layerId === props._layerId);
   const headerKey = layer?.headerProperty;
 
   // Return the value if the key exists in properties, otherwise null

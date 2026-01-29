@@ -7,7 +7,7 @@
     <div class="layer-list">
       <div
         v-for="layer in overlayLayers"
-        :key="layer.id"
+        :key="layer._layerId"
         class="layer-row"
         :class="{
           active: layer.active,
@@ -43,7 +43,7 @@
                 'loading-details',
               ].includes(layer.status)
             "
-            @change="layerStore.toggleLayer(layer.id)"
+            @change="layerStore.toggleLayer(layer._layerId)"
           />
 
           <span class="icon-container">
@@ -129,7 +129,7 @@
                 v-if="layer.status === 'error'"
                 class="action-btn retry-btn"
                 :title="layer.error || 'Click to retry'"
-                @click.stop="handleRetry(layer.id)"
+                @click.stop="handleRetry(layer._layerId)"
               >
                 🔄
               </button>
@@ -142,7 +142,7 @@
                 "
                 class="action-btn cancel-btn"
                 title="Cancel loading"
-                @click.stop="handleCancel(layer.id)"
+                @click.stop="handleCancel(layer._layerId)"
               >
                 ✕
               </button>
@@ -217,7 +217,7 @@ const handleMenuAction = ({ type, layer }) => {
 };
 
 const handleColorChange = ({ color, layer }) => {
-  layerStore.updateLayerColor(layer.id, color);
+  layerStore.updateLayerColor(layer._layerId, color);
 };
 
 // ADDED: Retry handler

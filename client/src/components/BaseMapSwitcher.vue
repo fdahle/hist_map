@@ -8,7 +8,7 @@
   >
     <div 
       v-for="layer in layersToDisplay" 
-      :key="layer.id" 
+      :key="layer._layerId" 
       class="base-thumb"
       :class="{ active: layer.active }"
       @click="handleLayerClick(layer)"

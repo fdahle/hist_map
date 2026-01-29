@@ -116,7 +116,7 @@ watch(
       if (oldLayer && oldLayer.setStyle) {
         // Reset to the current layer color (not just hardcoded blue)
         const parentLayer = layerStore.layers.find(
-          (l) => l.id === oldFeature.properties._layerId
+          (l) => l._layerId === oldFeature.properties._layerId
         );
         const baseColor = parentLayer?.color || "#3388ff";
 

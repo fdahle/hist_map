@@ -144,7 +144,7 @@ const processShapes = async () => {
       });
 
       // set some metadata
-      geojson._layer_id = uuidv4();
+      geojson._layerId = uuidv4();
       if (fileConfig?.metadata) geojson.metadata = fileConfig.metadata;
       if (geojson.crs) delete geojson.crs;
       geojson.crs = {

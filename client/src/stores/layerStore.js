@@ -33,7 +33,7 @@ export const useLayerStore = defineStore("layers", () => {
     url = null,
   ) => {
     // skip if layer with same ID already exists
-    if (layers.value.some((l) => l._layer_id === id)) return;
+    if (layers.value.some((l) => l._layerId === id)) return;
 
     // Determine initial status
     let initialStatus = "ready";
@@ -42,7 +42,7 @@ export const useLayerStore = defineStore("layers", () => {
     }
 
     layers.value.push({
-      id,
+      _layerId: id,
       name,
       type,
       category,
@@ -65,7 +65,7 @@ export const useLayerStore = defineStore("layers", () => {
   const debouncedProgressUpdates = new Map();
   
   const setLayerProgress = (layerId, progress) => {
-    const layer = layers.value.find((l) => l.id === layerId);
+    const layer = layers.value.find((l) => l._layerId === layerId);
     if (!layer) return;
 
     // For 100% progress, update immediately (no debounce)
@@ -79,7 +79,7 @@ export const useLayerStore = defineStore("layers", () => {
       debouncedProgressUpdates.set(
         layerId,
         debounce((prog) => {
-          const l = layers.value.find((layer) => layer.id === layerId);
+          const l = layers.value.find((layer) => layer._layerId === layerId);
           if (l) l.progress = prog;
         }, 50)
       );
@@ -89,12 +89,12 @@ export const useLayerStore = defineStore("layers", () => {
   };
 
   const setLayerStatus = (layerId, status) => {
-    const layer = layers.value.find((l) => l.id === layerId);
+    const layer = layers.value.find((l) => l._layerId === layerId);
     if (layer) layer.status = status;
   };
 
   const setLayerError = (layerId, errorMessage) => {
-    const layer = layers.value.find((l) => l.id === layerId);
+    const layer = layers.value.find((l) => l._layerId === layerId);
     if (layer) {
       layer.error = errorMessage;
       layer.status = "error";
@@ -103,7 +103,7 @@ export const useLayerStore = defineStore("layers", () => {
   };
 
   const retryLayer = (layerId) => {
-    const layer = layers.value.find((l) => l.id === layerId);
+    const layer = layers.value.find((l) => l._layerId === layerId);
     if (layer && layer.status === 'error') {
       layer.status = 'idle';
       layer.error = null;
@@ -113,7 +113,7 @@ export const useLayerStore = defineStore("layers", () => {
   };
 
   const cancelLayerLoad = (layerId) => {
-    const layer = layers.value.find((l) => l.id === layerId);
+    const layer = layers.value.find((l) => l._layerId === layerId);
     if (layer && ['downloading', 'processing', 'loading-details'].includes(layer.status)) {
       layer.status = 'idle';
       layer.progress = 0;
@@ -123,7 +123,7 @@ export const useLayerStore = defineStore("layers", () => {
 
   // IMPROVED: Async toggle that doesn't block the UI
   const toggleLayer = async (layerId) => {
-    const layer = layers.value.find((l) => l.id === layerId);
+    const layer = layers.value.find((l) => l._layerId === layerId);
 
     if (
       !layer ||
@@ -172,7 +172,7 @@ export const useLayerStore = defineStore("layers", () => {
   };
 
   const updateLayerColor = (layerId, newColor) => {
-    const layerObj = layers.value.find((l) => l.id === layerId);
+    const layerObj = layers.value.find((l) => l._layerId === layerId);
     if (!layerObj || !layerObj.layerInstance) return;
 
     layerObj.color = newColor;

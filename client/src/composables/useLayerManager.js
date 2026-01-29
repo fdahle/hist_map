@@ -172,7 +172,7 @@ export function useLayerManager(map) {
     });
 
     // Store the layer instance immediately
-    const storeLayer = layerStore.layers.find((l) => l.layerId === layer.id);
+    const storeLayer = layerStore.layers.find((l) => l._layerId === layer._layerId);
     if (storeLayer) {
       storeLayer.layerInstance = leafletLayer;
       storeLayer.geometryType = geometryType;
