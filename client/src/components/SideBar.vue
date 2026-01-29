@@ -11,7 +11,7 @@
         class="layer-row"
         :class="{
           active: layer.active,
-          'is-loading': layer.progress > 0 && layer.progress < 100,
+          'is-loading': layer.progress >= 0 && layer.progress < 100,
           'layer-error': !!layer.error,
         }"
         @contextmenu.prevent="handleRightClick($event, layer)"

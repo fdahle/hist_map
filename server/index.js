@@ -2,8 +2,7 @@
 import express from "express"; // import express
 import path from "path"; // to handle file paths
 import cors from "cors"; // to handle CORS issues
-
-import { fileURLToPath } from "url"; // Required to mimic __dirname in ES Modules
+import { fileURLToPath } from "url"; // 
 
 const app = express(); // create an Express app
 const PORT = 3000;
@@ -16,6 +15,9 @@ const corsOptions = {
     ],
   methods: ['GET', 'POST'], // Only allow specific actions
 };
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // serve input folder as well
 app.use(cors(corsOptions));

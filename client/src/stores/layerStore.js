@@ -21,6 +21,12 @@ export const useLayerStore = defineStore("layers", () => {
     // skip if layer with same ID already exists (safeguard against refresh duplicates)
     if (layers.value.some((l) => l.id === id)) return;
 
+    // loading is dependent on type and instance
+    let isLoading = false;
+    if (type === "geojson" && !layerInstance) {
+      isLoading = true;
+    } 
+
     layers.value.push({
       id,
       name,
@@ -31,9 +37,14 @@ export const useLayerStore = defineStore("layers", () => {
       geometryType: geometryType || "unknown",
       color: color || "#3388ff",
       progress: 0,
-      loading: false,
-      error: null, // New: track loading errors
+      loading: isLoading,
+      error: null,
     });
+  };
+
+  // reset store (e.g. on map removal)
+  const reset = () => {
+    layers.value = [];
   };
 
   const setLayerProgress = (layerId, progress) => {
@@ -52,8 +63,7 @@ export const useLayerStore = defineStore("layers", () => {
 
   const toggleLayer = (index) => {
     const layer = layers.value[index];
-    if (!layer || layer.error || !layer.layerInstance) return;
-
+if (!layer || layer.error || layer.loading || !layer.layerInstance) return;
     const mapStore = useMapStore();
     const map = mapStore.getMap();
     if (!map) return;
@@ -113,6 +123,7 @@ export const useLayerStore = defineStore("layers", () => {
     baseLayers,
     overlayLayers,
     addLayer,
+    reset,
     toggleLayer,
     setLayerProgress,
     setLayerError,

@@ -138,8 +138,15 @@ watch(
 );
 
 onUnmounted(() => {
+  // disconnect resize observer
   if (resizeObserver) resizeObserver.disconnect();
+
+  // reset layers
+  layerStore.reset()
+
+  // remove map
   if (map) map.remove();
+
 });
 </script>
 

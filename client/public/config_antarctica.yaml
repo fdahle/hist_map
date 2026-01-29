@@ -31,15 +31,15 @@ base_layers:
 overlay_layers:
   - name: "Antarctic Coastlines"
     type: "geojson"
-    url: "http://localhost:3000/data/processed/coastline.geojson"
+    url: "http://localhost:3000/data/coastline.geojson"
     visible: true
   - name: "Research Stations"
     type: "geojson"
-    url: "http://localhost:3000/data/processed/stations.json"
+    url: "http://localhost:3000/data/stations.geojson"
     visible: true
     pointType: "marker"
   - name: "Glaciers"
     type: "geojson"
-    url: "http://localhost:3000/data/processed/glaciers.geojson"
+    url: "http://localhost:3000/data/glaciers.geojson"
     visible: false
  
