@@ -1,5 +1,6 @@
 // client/src/composables/useLayerManager.js
 import L from "leaflet";
+import { watch } from "vue";
 import { useLayerStore } from "../stores/layerStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { createSvgPin, generateUUID } from "./utils";
@@ -9,18 +10,29 @@ export function useLayerManager(map) {
   const selectionStore = useSelectionStore();
   const layerRegistry = {};
 
+  // Watcher for Lazy Loading
+  watch(
+    () => layerStore.layers,
+    (layers) => {
+      layers.forEach((layer) => {
+        if (layer.active && layer.status === "idle" && layer.type === "geojson") {
+          loadGeoJsonLayer(layer);
+        }
+      });
+    },
+    { deep: true }
+  );
+
   const processLayer = async (layerConf, category) => {
-    // Prioritize config ID, otherwise generate one (fallback)
     const layerId = layerConf._id || generateUUID();
 
     // TILE LAYERS
     if (layerConf.type === "tile") {
-      // create Leaflet tile layer
       const leafletLayer = L.tileLayer(layerConf.url, {
         attribution: layerConf.attribution,
+        tileSize: layerConf.tileSize || 256,
       });
 
-      // add to store
       layerStore.addLayer(
         layerId,
         layerConf.name,
@@ -28,9 +40,11 @@ export function useLayerManager(map) {
         "tile",
         category,
         layerConf.visible,
+        "tile",
+        null,
+        layerConf.url
       );
 
-      // add to map if active
       const storeLayer = layerStore.layers.find((l) => l.id === layerId);
       if (storeLayer && storeLayer.active) {
         leafletLayer.addTo(map);
@@ -40,59 +54,74 @@ export function useLayerManager(map) {
 
     // GEOJSON LAYERS
     if (layerConf.type === "geojson") {
-      // add to store with null instance initially
       layerStore.addLayer(
-        layerId,  // id
-        layerConf.name, // name
-        null, // layerInstance
-        "geojson", // type
-        category,  // category
-        layerConf.visible,  // isVisible
-        "unknown",  // geometryType
-        layerConf.color,  // color
+        layerId,
+        layerConf.name,
+        null, 
+        "geojson",
+        category,
+        layerConf.visible,
+        "unknown",
+        layerConf.color,
+        layerConf.url 
       );
-
-      // Start Worker
-      const worker = new Worker(
-        new URL("../workers/layerWorker.js", import.meta.url),
-        { type: "module" },
-      );
-
-      // Send URL to worker
-      worker.postMessage({ url: layerConf.url, _id: layerId });
-
-      // Handle messages from worker
-      worker.onmessage = (e) => {
-        const { type, progress, data, error } = e.data;
-
-        // update message
-        if (type === "PROGRESS") {
-          layerStore.setLayerProgress(layerId, progress);
-
-          // success message
-        } else if (type === "SUCCESS") {
-          // finalize layer creation
-          finalizeGeoJsonLayer(data, layerConf, category, layerId);
-          worker.terminate();
-
-          // error message
-        } else if (type === "ERROR") {
-          console.error(
-            `[LayerManager] Error loading ${layerConf.name} (id: ${layerId}):`,
-            error,
-          );
-          layerStore.setLayerError(layerId, error || "Failed to fetch file");
-          worker.terminate();
-        }
-      };
     }
   };
 
-  const finalizeGeoJsonLayer = async (data, layerConf, category, layerId) => {
-    // determine geometry type
-    const geometryType = data.features?.[0]?.geometry?.type || "Unknown";
+  const loadGeoJsonLayer = (layer) => {
+    if (__APP_DEBUG__) {
+      console.group(`[LayerManager] 📥 Start Loading: "${layer.name}"`);
+      console.debug(`ID: ${layer.id}`);
+      console.debug(`URL: ${layer.url}`);
+    }
 
-    // create Leaflet GeoJSON layer
+    layerStore.setLayerStatus(layer.id, "downloading");
+
+    const worker = new Worker(
+      new URL("../workers/layerWorker.js", import.meta.url),
+      { type: "module" },
+    );
+
+    // Pass the debug flag to the worker
+    worker.postMessage({ 
+      url: layer.url, 
+      layerId: layer.id,
+      layerName: layer.name,
+      debug: __APP_DEBUG__ 
+    });
+
+    worker.onmessage = (e) => {
+      const { type, progress, data, error } = e.data;
+
+      if (type === "PROGRESS") {
+        layerStore.setLayerProgress(layer.id, progress);
+
+      } else if (type === "SUCCESS") {
+        if (__APP_DEBUG__) console.debug(`[LayerManager - ${layer.name}] ✅ Worker finished downloading & parsing.`);
+        
+        layerStore.setLayerStatus(layer.id, "processing");
+        layerStore.setLayerProgress(layer.id, 0);
+        finalizeGeoJsonLayer(data, layer, worker);
+
+      } else if (type === "ERROR") {
+        if (__APP_DEBUG__) console.debug(`[LayerManager - ${layer.name}] ❌ Worker Error:`, error);
+        
+        console.error(`[LayerManager - ${layer.name}] Error loading layer}:`, error);
+        layerStore.setLayerError(layer.id, error || "Failed to fetch file");
+        worker.terminate();
+        if (__APP_DEBUG__) console.groupEnd();
+      }
+    };
+  };
+
+  const finalizeGeoJsonLayer = async (data, layer, worker) => {
+    const geometryType = data.features?.[0]?.geometry?.type || "Unknown";
+    const totalFeatures = Array.isArray(data.features) ? data.features.length : 1;
+
+    if (__APP_DEBUG__) {
+      console.debug(`[LayerManager - ${layer.name}] ⚙️ Processing ${totalFeatures} features for rendering...`);
+    }
+
     const leafletLayer = L.geoJSON(null, {
       coordsToLatLng: (coords) => {
         const crs = map.options.crs;
@@ -101,70 +130,84 @@ export function useLayerManager(map) {
         }
         return L.GeoJSON.coordsToLatLng(coords);
       },
-
-      // set style for polygon and line features
       style: () => ({
-        color: layerConf.color || "#3388ff",
+        color: layer.color || "#3388ff",
         weight: 2,
         fillOpacity: 0.5,
       }),
-
-      // customize point features
       pointToLayer: (feature, latlng) => {
         return L.marker(latlng, {
-          icon: createSvgPin(layerConf.color || "#3388ff"),
+          icon: createSvgPin(layer.color || "#3388ff"),
         });
       },
-
-      // add click handler for feature selection
-      onEachFeature: (feature, layer) => {
+      onEachFeature: (feature, lLayer) => {
         if (!feature.properties._id) feature.properties._id = generateUUID();
-
-        feature.properties.layerId = layerId; // Use stable layerId
-        layerRegistry[feature.properties.id] = layer;
-        layer.on("click", (e) => {
+        feature.properties.layerId = layer.id;
+        layerRegistry[feature.properties._id] = lLayer;
+        lLayer.on("click", (e) => {
           L.DomEvent.stopPropagation(e);
           selectionStore.selectFeature(feature);
         });
       },
     });
 
-    // Link leaflet instance back to store
-    const storeLayer = layerStore.layers.find((l) => l.id === layerId);
+    const storeLayer = layerStore.layers.find((l) => l.id === layer.id);
     if (storeLayer) {
       storeLayer.layerInstance = leafletLayer;
       storeLayer.geometryType = geometryType;
-      storeLayer.loading = false;
       if (storeLayer.active) leafletLayer.addTo(map);
     }
 
-    // Batch processing
-    const features = Array.isArray(data.features)
-      ? data.features
-      : data
-        ? [data]
-        : [];
-    const batchSize = 100;
+    // --- TIME-BUDGETED BATCH PROCESSING ---
+    const features = Array.isArray(data.features) ? data.features : [data];
     let index = 0;
+    
+    // Performance Settings
+    const TIME_BUDGET_MS = 12; 
+    const UPDATE_THRESHOLD = 5; 
+    let lastProgressUpdate = 0;
+    const globalStartTime = performance.now(); // Track total render time
 
     const processBatch = () => {
-      const end = Math.min(index + batchSize, features.length);
-      leafletLayer.addData(features.slice(index, end));
-      index = end;
+      const startTime = performance.now();
 
-      layerStore.setLayerProgress(
-        layerId,
-        Math.round((index / features.length) * 100),
-      );
+      while (index < features.length) {
+        const batchSize = 20; 
+        const end = Math.min(index + batchSize, features.length);
+        
+        leafletLayer.addData(features.slice(index, end));
+        index = end;
+
+        if (performance.now() - startTime > TIME_BUDGET_MS) {
+          break; 
+        }
+      }
+
+      const currentProgress = Math.round((index / features.length) * 100);
+      if (storeLayer && (currentProgress - lastProgressUpdate >= UPDATE_THRESHOLD || index === features.length)) {
+        layerStore.setLayerProgress(layer.id, currentProgress, "processing");
+        lastProgressUpdate = currentProgress;
+      }
 
       if (index < features.length) {
-        setTimeout(processBatch, 0);
+        requestAnimationFrame(processBatch); 
       } else {
-        if (storeLayer) storeLayer.progress = 100;
+        // Done
+        if (storeLayer) {
+            layerStore.setLayerStatus(layer.id, "ready");
+            layerStore.setLayerProgress(layer.id, 100);
+        }
+        worker.terminate();
+
+        if (__APP_DEBUG__) {
+          const totalTime = (performance.now() - globalStartTime).toFixed(0);
+          console.debug(`[LayerManager - ${layer.name}] ✨ Render completed in ${totalTime}ms.`);
+          console.groupEnd();
+        }
       }
     };
 
-    processBatch();
+    requestAnimationFrame(processBatch);
   };
 
   return { processLayer, layerRegistry };

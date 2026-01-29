@@ -2,6 +2,20 @@ import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import * as shapefile from "shapefile"; //
+import * as turf from "@turf/turf";
+
+// --- CONFIGURATION ---
+const CONFIG = {
+  // 1. SIMPLIFICATION
+  // Higher = simpler geometry (fewer points).
+  // 0.001 is very conservative, 0.1 is aggressive. Start with 0.01.
+  simplifyTolerance: 10,
+
+  // 2. PRECISION
+  // How many decimal places to keep.
+  // For EPSG:3031 (meters), '0' (integers) is usually precise enough (1 meter accuracy).
+  coordinatePrecision: 0,
+};
 
 const INPUT_DIR = path.resolve("../input");
 const OUTPUT_DIR = path.resolve("data");
@@ -35,9 +49,33 @@ const processShapes = async () => {
     }
 
     if (geojson) {
+      // simply geometry
+      try {
+        console.log(
+          `  - Simplifying (tolerance: ${CONFIG.simplifyTolerance})...`,
+        );
+        geojson = turf.simplify(geojson, {
+          tolerance: CONFIG.simplifyTolerance,
+          highQuality: true, // Takes longer but better results
+          mutate: true, // Updates object in place
+        });
+      } catch (err) {
+        console.warn("  ! Simplification failed, skipping step.", err);
+      }
+
+      // 2. truncate Coordinates (Reduce precision)
+      console.log(
+        `  - Truncating coordinates to ${CONFIG.coordinatePrecision} decimals...`,
+      );
+      geojson = turf.truncate(geojson, {
+        precision: CONFIG.coordinatePrecision,
+        coordinates: 2, // Remove 'z' (elevation) coordinates if they exist
+        mutate: true,
+      });
+
       // create a unique layer ID
       const layerId = uuidv4();
-      geojson._id = layerId;
+      geojson._layer_id = layerId;
 
       // ensure data is a FeatureCollection
       if (geojson.type === "Feature") {
@@ -50,7 +88,6 @@ const processShapes = async () => {
         feature.properties._id = uuidv4();
         return feature;
       });
-
 
       const outputName = file.split(".")[0] + ".geojson";
       fs.writeFileSync(

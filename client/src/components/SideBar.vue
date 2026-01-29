@@ -11,83 +11,103 @@
         class="layer-row"
         :class="{
           active: layer.active,
-          'is-loading': layer.progress >= 0 && layer.progress < 100,
-          'layer-error': !!layer.error,
+          'is-idle': layer.status === 'idle',
+          'layer-error': layer.status === 'error',
         }"
         @contextmenu.prevent="handleRightClick($event, layer)"
       >
         <div
-          v-if="layer.progress > 0 && layer.progress < 100"
+          v-if="['downloading', 'processing'].includes(layer.status)"
           class="progress-bg"
         >
           <div
             class="progress-fill"
+            :class="layer.status"
             :style="{ width: layer.progress + '%' }"
           ></div>
         </div>
 
-        <label :class="{ 'disabled-label': !!layer.error }">
+        <label :class="{ 'disabled-label': layer.status === 'error' }">
           <input
             type="checkbox"
             :checked="layer.active"
             :disabled="
-              (layer.progress > 0 && layer.progress < 100) || !!layer.error
+              ['downloading', 'processing', 'error'].includes(layer.status)
             "
             @change="layerStore.toggleLayer(layer.id)"
           />
 
-          <span
-            class="geom-icon"
-            :style="{ color: layer.error ? '#ccc' : layer.color || '#666' }"
-          >
-            <svg
-              v-if="getIconType(layer.geometryType) === 'point'"
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
+          <span class="icon-container">
+            <div
+              v-if="['downloading', 'processing'].includes(layer.status)"
+              class="spinner"
+            ></div>
+
+            <span
+              v-else
+              class="geom-icon"
+              :style="{
+                color:
+                  layer.status === 'error' ? '#ccc' : layer.color || '#666',
+              }"
             >
-              <circle cx="12" cy="12" r="6" fill="currentColor" />
-            </svg>
-            <svg
-              v-else-if="getIconType(layer.geometryType) === 'line'"
-              viewBox="0 0 24 24"
-              width="16"
-              height="16"
-            >
-              <path
-                d="M3 17 L9 7 L15 17 L21 7"
-                stroke="currentColor"
-                stroke-width="2.5"
-                fill="none"
-              />
-            </svg>
-            <svg v-else viewBox="0 0 24 24" width="16" height="16">
-              <rect
-                x="4"
-                y="4"
+              <svg
+                v-if="getIconType(layer.geometryType) === 'point'"
+                viewBox="0 0 24 24"
                 width="16"
                 height="16"
-                rx="2"
-                fill="currentColor"
-                opacity="0.5"
-              />
-            </svg>
+              >
+                <circle cx="12" cy="12" r="6" fill="currentColor" />
+              </svg>
+              <svg
+                v-else-if="getIconType(layer.geometryType) === 'line'"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+              >
+                <path
+                  d="M3 17 L9 7 L15 17 L21 7"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  fill="none"
+                />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" width="16" height="16">
+                <rect
+                  x="4"
+                  y="4"
+                  width="16"
+                  height="16"
+                  rx="2"
+                  fill="currentColor"
+                  opacity="0.5"
+                />
+              </svg>
+            </span>
           </span>
 
           <div class="layer-title-content">
             <span
               class="layer-name-text"
-              :style="{ color: layer.error ? '#888' : 'inherit' }"
+              :style="{ color: layer.status === 'error' ? '#888' : 'inherit' }"
             >
               {{ layer.name }}
+
+              <small v-if="layer.status === 'downloading'" class="loading-text">
+                (DL {{ layer.progress }}%)
+              </small>
               <small
-                v-if="layer.progress > 0 && layer.progress < 100"
+                v-else-if="layer.status === 'processing'"
                 class="loading-text"
               >
-                ({{ layer.progress }}%)
+                (Proc {{ layer.progress }}%)
               </small>
             </span>
-            <span v-if="layer.error" class="error-icon" :title="layer.error">
+            <span
+              v-if="layer.status === 'error'"
+              class="error-icon"
+              :title="layer.error"
+            >
               ⚠️
             </span>
           </div>
@@ -117,19 +137,18 @@ import ContextMenu from "./ContextMenu.vue";
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
 
-const { layers, overlayLayers } = storeToRefs(layerStore);
-
+const { overlayLayers } = storeToRefs(layerStore);
 const contextMenuRef = ref(null);
 
 const getIconType = (layerType) => {
   const type = layerType?.toLowerCase() || "unknown";
   if (type.includes("point")) return "point";
   if (type.includes("line")) return "line";
-  return "unknown";
+  return "unknown"; // Default icon for unknown or polygon
 };
 
 const handleRightClick = (event, layer) => {
-  if (layer.progress < 100 || !!layer.error) return;
+  if (layer.status !== "ready") return;
   contextMenuRef.value.open(event, layer);
 };
 
@@ -218,6 +237,15 @@ const handleColorChange = ({ color, layer }) => {
   border-left: 4px solid #007bff;
 }
 
+/* Idle state styling */
+.layer-row.is-idle .layer-name-text {
+  color: #777;
+}
+.layer-row.is-idle .geom-icon {
+  opacity: 0.5;
+  filter: grayscale(100%);
+}
+
 .progress-bg {
   position: absolute;
   bottom: 0;
@@ -229,20 +257,18 @@ const handleColorChange = ({ color, layer }) => {
 
 .progress-fill {
   height: 100%;
-  background: #28a745;
+  background: #17a2b8; /* Blue for downloading */
   transition: width 0.3s ease;
+}
+
+.progress-fill.processing {
+  background: #28a745; /* Green for processing */
 }
 
 .loading-text {
   color: #6c757d;
   font-size: 11px;
   margin-left: 5px;
-}
-
-.is-loading {
-  background: #fdfdfd;
-  opacity: 0.8;
-  cursor: wait;
 }
 
 label {
@@ -253,7 +279,6 @@ label {
   z-index: 1;
 }
 
-/* Container for text and icon */
 .layer-title-content {
   display: flex;
   justify-content: space-between;
@@ -293,14 +318,39 @@ label {
   font-size: 13px;
 }
 
-.geom-icon {
+.icon-container {
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-left: 8px;
   margin-right: 4px;
-  width: 20px;
   flex-shrink: 0;
+}
+
+.geom-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* Spinner Animation */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ccc;
+  border-top-color: #007bff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 input[type="checkbox"] {

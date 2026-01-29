@@ -18,12 +18,14 @@ base_layers:
     type: "tile"
     url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-geyser"
     visible: true
+    tileSize: 512
     attribution: "© GBIF, OpenStreetMap contributors"
 
   - name: "Antarctic (GBIF Classic)"
     type: "tile"
     url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-classic"
     visible: false
+    tileSize: 512
     attribution: "© GBIF, OpenStreetMap contributors"
 
 # 4. Overlay Layers

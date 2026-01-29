@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { ref, markRaw } from "vue";
 
 export const useMapStore = defineStore("map", () => {
   // --- STATE ---
@@ -20,7 +20,7 @@ export const useMapStore = defineStore("map", () => {
     // For simplicity in Pinia setup stores, a raw variable outside is tricky,
     // so we often just use a standard let or a shallowRef.
     // Here we use a closure variable for the raw instance to avoid Proxy overhead:
-    mapInstance.value = map;
+    mapInstance.value = markRaw(map);
 
     // Initialize state
     zoom.value = map.getZoom();

@@ -1,23 +1,29 @@
 import L from "leaflet";
 import "proj4leaflet";
+import proj4 from "proj4";
 
-/**
- * EPSG:3031 - WGS 84 / Antarctic Polar Stereographic
- * Used for GBIF Antarctic tiles and polar data.
- *
- */
-// Verification of your CRS constant for these URLs
+proj4.defs(
+  "EPSG:3031",
+  "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+);
+
+const extent = 12367396.2185; // Correct Extent for GBIF
+const tileSize = 512;         // GBIF tiles are 512x512
+
+const resolutions = [];
+let res = (extent * 2) / tileSize;
+for (let i = 0; i < 16; i++) {
+  resolutions.push(res);
+  res /= 2;
+}
+
 export const CRS_3031 = new L.Proj.CRS(
   "EPSG:3031",
   "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs",
   {
-    // These resolutions are required for GBIF tiles to line up with zoom levels
-    resolutions: [32768, 16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64, 32],
-    origin: [-12367396.2185, 12367396.2185], // Origin for GBIF polar tiles
-    bounds: L.bounds(
-      [-12367396.2185, -12367396.2185],
-      [12367396.2185, 12367396.2185],
-    ),
+    origin: [-extent, extent], // Top-Left of the GBIF grid
+    resolutions: resolutions,
+    bounds: L.bounds([-extent, -extent], [extent, extent]),
   },
 );
 

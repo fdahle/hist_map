@@ -1,6 +1,6 @@
 // client/src/stores/layerStore.js
 import { defineStore } from "pinia";
-import { ref, computed } from "vue";
+import { markRaw, ref, computed } from "vue";
 import { useMapStore } from "./mapStore";
 import { createSvgPin } from "../composables/utils";
 
@@ -17,15 +17,16 @@ export const useLayerStore = defineStore("layers", () => {
     isVisible,
     geometryType,
     color,
+    url = null, // 1. Added URL parameter for lazy loading
   ) => {
-    // skip if layer with same ID already exists (safeguard against refresh duplicates)
+    // skip if layer with same ID already exists
     if (layers.value.some((l) => l.id === id)) return;
 
-    // loading is dependent on type and instance
-    let isLoading = false;
+    // 2. Determine initial status
+    let initialStatus = "ready";
     if (type === "geojson" && !layerInstance) {
-      isLoading = true;
-    } 
+      initialStatus = "idle"; // Default to idle for GeoJSON without data
+    }
 
     layers.value.push({
       id,
@@ -33,16 +34,16 @@ export const useLayerStore = defineStore("layers", () => {
       type,
       category,
       active: isVisible,
-      layerInstance,
+      layerInstance: layerInstance ? markRaw(layerInstance) : null,
       geometryType: geometryType || "unknown",
       color: color || "#3388ff",
+      url,
       progress: 0,
-      loading: isLoading,
+      status: initialStatus, // 3. Added status field
       error: null,
     });
   };
 
-  // reset store (e.g. on map removal)
   const reset = () => {
     layers.value = [];
   };
@@ -52,18 +53,33 @@ export const useLayerStore = defineStore("layers", () => {
     if (layer) layer.progress = progress;
   };
 
+  const setLayerStatus = (layerId, status) => {
+    const layer = layers.value.find((l) => l.id === layerId);
+    if (layer) layer.status = status;
+  };
+
   const setLayerError = (layerId, errorMessage) => {
     const layer = layers.value.find((l) => l.id === layerId);
     if (layer) {
       layer.error = errorMessage;
-      layer.loading = false;
+      layer.status = "error";
       layer.progress = 0;
     }
   };
 
-  const toggleLayer = (index) => {
-    const layer = layers.value[index];
-if (!layer || layer.error || layer.loading || !layer.layerInstance) return;
+  // 5. Fixed toggleLayer to handle IDs and Lazy Loading
+  const toggleLayer = (layerId) => {
+    const layer = layers.value.find((l) => l.id === layerId);
+
+    // Allow toggling if it's idle (to trigger load) or ready. Block if error/loading.
+    if (
+      !layer ||
+      layer.status === "error" ||
+      layer.status === "downloading" ||
+      layer.status === "processing"
+    )
+      return;
+
     const mapStore = useMapStore();
     const map = mapStore.getMap();
     if (!map) return;
@@ -73,16 +89,21 @@ if (!layer || layer.error || layer.loading || !layer.layerInstance) return;
       layers.value.forEach((l) => {
         if (l.category === "base" && l.active) {
           l.active = false;
-          map.removeLayer(l.layerInstance);
+          if (l.layerInstance) map.removeLayer(l.layerInstance);
         }
       });
       layer.active = true;
-      map.addLayer(layer.layerInstance);
+      if (layer.layerInstance) map.addLayer(layer.layerInstance);
     } else {
       layer.active = !layer.active;
-      layer.active
-        ? map.addLayer(layer.layerInstance)
-        : map.removeLayer(layer.layerInstance);
+
+      // Only toggle on map if the instance exists.
+      // If status is 'idle', the Watcher in useLayerManager will see 'active=true' and start loading.
+      if (layer.layerInstance) {
+        layer.active
+          ? map.addLayer(layer.layerInstance)
+          : map.removeLayer(layer.layerInstance);
+      }
     }
   };
 
@@ -126,6 +147,7 @@ if (!layer || layer.error || layer.loading || !layer.layerInstance) return;
     reset,
     toggleLayer,
     setLayerProgress,
+    setLayerStatus,
     setLayerError,
     updateLayerColor,
   };
