@@ -2,14 +2,14 @@
   "shapes/georef_sat.geojson": {
     "metadata": {
       "hasThumbnails": true,
-      "thumbnailTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/thumb/CA{tma_number}/CA{tma_number}32V/{image_id}_thumbnail.jpg"
+      "thumbnailTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/thumb/CA{tma_number}/CA{tma_number}32V/{image_id}_thumbnail.jpg",
+      "headerAttribute": "image_id"
     },
     "attributes": {
       "attributesFile": "attributes/images.csv",
       "attributesKey": "image_id",
       "attributesDelimiter": ";",
-      "ownKey": "image_id",
-      "headerAttribute": "image_id"
+      "ownKey": "image_id"
     }
   }
 }

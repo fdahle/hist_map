@@ -22,7 +22,7 @@ export const useLayerStore = defineStore("layers", () => {
 
   // --- ACTIONS ---
   const addLayer = (
-    id,
+    layerId,
     name,
     layerInstance,
     type,
@@ -33,7 +33,7 @@ export const useLayerStore = defineStore("layers", () => {
     url = null,
   ) => {
     // skip if layer with same ID already exists
-    if (layers.value.some((l) => l._layerId === id)) return;
+    if (layers.value.some((l) => l._layerId === layerId)) return;
 
     // Determine initial status
     let initialStatus = "ready";
@@ -42,7 +42,7 @@ export const useLayerStore = defineStore("layers", () => {
     }
 
     layers.value.push({
-      _layerId: id,
+      _layerId: layerId,
       name,
       type,
       category,

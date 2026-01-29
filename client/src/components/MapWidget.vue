@@ -59,7 +59,7 @@ const applyColorToLeafletLayer = (leafletLayer, newColor) => {
 // This function bridges the Sidebar's event to the Store and Map
 const handleColorChange = ({ color, layer }) => {
   // 1. Update Pinia Store state (persistence)
-  layerStore.updateLayerColor(layer.id, color);
+  layerStore.updateLayerColor(layer._layerId, color);
 
   // 2. Update Map Visuals immediately
   applyColorToLeafletLayer(layer.layerInstance, color);
@@ -110,9 +110,9 @@ watch(
   (newFeature, oldFeature) => {
     if (!layerRegistry) return;
 
-    // FIXED: Use _id instead of id
-    if (oldFeature?.properties?._id) {
-      const oldLayer = layerRegistry[oldFeature.properties._id];
+    // FIXED: Use _featureId instead of id
+    if (oldFeature?.properties?._featureId) {
+      const oldLayer = layerRegistry[oldFeature.properties._featureId];
       if (oldLayer && oldLayer.setStyle) {
         // Reset to the current layer color (not just hardcoded blue)
         const parentLayer = layerStore.layers.find(
@@ -128,8 +128,8 @@ watch(
     }
 
     // FIXED: Use _id instead of id
-    if (newFeature?.properties?._id) {
-      const newLayer = layerRegistry[newFeature.properties._id];
+    if (newFeature?.properties?._featureId) {
+      const newLayer = layerRegistry[newFeature.properties._featureId];
       if (newLayer && newLayer.setStyle) {
         newLayer.setStyle({
           weight: 5,

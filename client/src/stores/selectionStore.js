@@ -8,7 +8,7 @@ export const useSelectionStore = defineStore("selection", () => {
   function selectFeature(feature) {
     if (
       selectedFeature.value &&
-      selectedFeature.value.properties._id === feature.properties._id
+      selectedFeature.value.properties._featureId === feature.properties._featureId
     ) {
       // If clicking the same thing twice, deselect it
       selectedFeature.value = null;

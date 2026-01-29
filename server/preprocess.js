@@ -133,7 +133,7 @@ const processShapes = async () => {
           /* keep original on fail */
         }
 
-        feature.properties._id = uuidv4();
+        feature.properties._featureId = uuidv4();
         return feature;
       });
 

@@ -16,16 +16,20 @@ export function useLayerManager(map) {
     () => layerStore.layers,
     (layers) => {
       layers.forEach((layer) => {
-        if (layer.active && layer.status === "idle" && layer.type === "geojson") {
+        if (
+          layer.active &&
+          layer.status === "idle" &&
+          layer.type === "geojson"
+        ) {
           loadGeoJsonLayer(layer);
         }
       });
     },
-    { deep: true }
+    { deep: true },
   );
 
   const processLayer = async (layerConf, category) => {
-    const layerId = layerConf._id || generateUUID();
+    const layerId = layerConf._layerId || generateUUID();
 
     // TILE LAYERS
     if (layerConf.type === "tile") {
@@ -43,7 +47,7 @@ export function useLayerManager(map) {
         layerConf.visible,
         "tile",
         null,
-        layerConf.url
+        layerConf.url,
       );
 
       const storeLayer = layerStore.layers.find((l) => l._layerId === layerId);
@@ -58,13 +62,13 @@ export function useLayerManager(map) {
       layerStore.addLayer(
         layerId,
         layerConf.name,
-        null, 
+        null,
         "geojson",
         category,
         layerConf.visible,
         "unknown",
         layerConf.color,
-        layerConf.url 
+        layerConf.url,
       );
     }
   };
@@ -72,62 +76,73 @@ export function useLayerManager(map) {
   const loadGeoJsonLayer = (layer) => {
     if (__APP_DEBUG__) {
       console.group(`[LayerManager] 🔥 Start Loading: "${layer.name}"`);
-      console.debug(`ID: ${layer.id}`);
+      console.debug(`ID: ${layer._layerId}`);
       console.debug(`URL: ${layer.url}`);
     }
 
     // Cancel existing worker if layer is being reloaded
-    if (activeWorkers.has(layer.id)) {
-      activeWorkers.get(layer.id).terminate();
-      activeWorkers.delete(layer.id);
+    if (activeWorkers.has(layer._layerId)) {
+      activeWorkers.get(layer._layerId).terminate();
+      activeWorkers.delete(layer._layerId);
     }
 
-    layerStore.setLayerStatus(layer.id, "downloading");
+    layerStore.setLayerStatus(layer._layerId, "downloading");
 
     const worker = new Worker(
       new URL("../workers/layerWorker.js", import.meta.url),
       { type: "module" },
     );
 
-    activeWorkers.set(layer.id, worker);
+    activeWorkers.set(layer._layerId, worker);
 
-    worker.postMessage({ 
-      url: layer.url, 
-      layerId: layer.id,
+    worker.postMessage({
+      url: layer.url,
+      layerId: layer._layerId,
       layerName: layer.name,
-      debug: __APP_DEBUG__ 
+      debug: __APP_DEBUG__,
     });
 
     worker.onmessage = (e) => {
       const { type, progress, data, error } = e.data;
 
       if (type === "PROGRESS") {
-        layerStore.setLayerProgress(layer.id, progress);
-
+        layerStore.setLayerProgress(layer._layerId, progress);
       } else if (type === "SUCCESS") {
-        if (__APP_DEBUG__) console.debug(`[LayerManager - ${layer.name}] ✅ Worker finished downloading & parsing.`);
-        
-        layerStore.setLayerStatus(layer.id, "processing");
-        layerStore.setLayerProgress(layer.id, 0);
-        finalizeGeoJsonLayer(data, layer, worker);
+        if (__APP_DEBUG__)
+          console.debug(
+            `[LayerManager - ${layer.name}] ✅ Worker finished downloading & parsing.`,
+          );
 
+        layerStore.setLayerStatus(layer._layerId, "processing");
+        layerStore.setLayerProgress(layer._layerId, 0);
+        finalizeGeoJsonLayer(data, layer, worker);
       } else if (type === "ERROR") {
-        if (__APP_DEBUG__) console.debug(`[LayerManager - ${layer.name}] ❌ Worker Error:`, error);
-        
-        console.error(`[LayerManager - ${layer.name}] Error loading layer:`, error);
-        layerStore.setLayerError(layer.id, error || "Failed to fetch file");
-        
-        activeWorkers.delete(layer.id);
+        if (__APP_DEBUG__)
+          console.debug(
+            `[LayerManager - ${layer.name}] ❌ Worker Error:`,
+            error,
+          );
+
+        console.error(
+          `[LayerManager - ${layer.name}] Error loading layer:`,
+          error,
+        );
+        layerStore.setLayerError(
+          layer._layerId,
+          error || "Failed to fetch file",
+        );
+
+        activeWorkers.delete(layer._layerId);
         worker.terminate();
-        
+
         if (__APP_DEBUG__) console.groupEnd();
       }
     };
 
     worker.onerror = (err) => {
       console.error(`[LayerManager - ${layer.name}] Worker crashed:`, err);
-      layerStore.setLayerError(layer.id, "Worker crashed");
-      activeWorkers.delete(layer.id);
+      layerStore.setLayerError(layer._layerId, "Worker crashed");
+      activeWorkers.delete(layer._layerId);
       worker.terminate();
       if (__APP_DEBUG__) console.groupEnd();
     };
@@ -135,10 +150,14 @@ export function useLayerManager(map) {
 
   const finalizeGeoJsonLayer = async (data, layer, worker) => {
     const geometryType = data.features?.[0]?.geometry?.type || "Unknown";
-    const totalFeatures = Array.isArray(data.features) ? data.features.length : 1;
+    const totalFeatures = Array.isArray(data.features)
+      ? data.features.length
+      : 1;
 
     if (__APP_DEBUG__) {
-      console.debug(`[LayerManager - ${layer.name}] ⚙️ Processing ${totalFeatures} features for rendering...`);
+      console.debug(
+        `[LayerManager - ${layer.name}] ⚙️ Processing ${totalFeatures} features for rendering...`,
+      );
     }
 
     // CRITICAL: Create layer but DON'T add to map yet
@@ -161,9 +180,10 @@ export function useLayerManager(map) {
         });
       },
       onEachFeature: (feature, lLayer) => {
-        if (!feature.properties._id) feature.properties._id = generateUUID();
+        if (!feature.properties._featureId)
+          feature.properties._featureId = generateUUID();
         feature.properties._layerId = layer._layerId;
-        layerRegistry[feature.properties._id] = lLayer;
+        layerRegistry[feature.properties._featureId] = lLayer;
         lLayer.on("click", (e) => {
           L.DomEvent.stopPropagation(e);
           selectionStore.selectFeature(feature);
@@ -172,20 +192,26 @@ export function useLayerManager(map) {
     });
 
     // Store the layer instance immediately
-    const storeLayer = layerStore.layers.find((l) => l._layerId === layer._layerId);
+    const storeLayer = layerStore.layers.find(
+      (l) => l._layerId === layer._layerId,
+    );
     if (storeLayer) {
       storeLayer.layerInstance = leafletLayer;
       storeLayer.geometryType = geometryType;
-      // DON'T add to map yet - wait until all features are loaded
+
+      // add metadata if available
+      if (data.metadata) {
+        storeLayer.metadata = data.metadata;
+      }
     }
 
     // --- TIME-BUDGETED BATCH PROCESSING ---
     const features = Array.isArray(data.features) ? data.features : [data];
     let index = 0;
-    
+
     // Performance settings optimized for your glaciers
-    const TIME_BUDGET_MS = 6;     // Even shorter for better responsiveness
-    const UPDATE_THRESHOLD = 15;   // Update every 15% to reduce reactivity
+    const TIME_BUDGET_MS = 6; // Even shorter for better responsiveness
+    const UPDATE_THRESHOLD = 15; // Update every 15% to reduce reactivity
     let lastProgressUpdate = 0;
     const globalStartTime = performance.now();
 
@@ -193,14 +219,16 @@ export function useLayerManager(map) {
     const PREVIEW_THRESHOLD = 5000;
     if (features.length > PREVIEW_THRESHOLD) {
       if (__APP_DEBUG__) {
-        console.debug(`[LayerManager - ${layer.name}] 📸 Large dataset detected (${totalFeatures} features). Showing preview...`);
+        console.debug(
+          `[LayerManager - ${layer.name}] 📸 Large dataset detected (${totalFeatures} features). Showing preview...`,
+        );
       }
-      
+
       const previewFeatures = features.filter((_, i) => i % 10 === 0);
       leafletLayer.addData(previewFeatures);
-      layerStore.setLayerStatus(layer.id, "loading-details");
-      
-      await new Promise(resolve => setTimeout(resolve, 50));
+      layerStore.setLayerStatus(layer._layerId, "loading-details");
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
 
     const processBatch = () => {
@@ -208,28 +236,42 @@ export function useLayerManager(map) {
 
       while (index < features.length) {
         // REDUCED: Even smaller batches for complex polygons
-        const batchSize = 5;  // Your glaciers are complex, use smaller batches
+        const batchSize = 5; // Your glaciers are complex, use smaller batches
         const end = Math.min(index + batchSize, features.length);
-        
+
         leafletLayer.addData(features.slice(index, end));
         index = end;
 
         if (performance.now() - startTime > TIME_BUDGET_MS) {
-          break; 
+          break;
         }
       }
 
       const currentProgress = Math.round((index / features.length) * 100);
-      if (storeLayer && (currentProgress - lastProgressUpdate >= UPDATE_THRESHOLD || index === features.length)) {
-        layerStore.setLayerProgress(layer.id, currentProgress, "processing");
+      if (
+        storeLayer &&
+        (currentProgress - lastProgressUpdate >= UPDATE_THRESHOLD ||
+          index === features.length)
+      ) {
+        layerStore.setLayerProgress(
+          layer._layerId,
+          currentProgress,
+          "processing",
+        );
         lastProgressUpdate = currentProgress;
       }
 
       if (index < features.length) {
-        requestAnimationFrame(processBatch); 
+        requestAnimationFrame(processBatch);
       } else {
         // CRITICAL FIX: Only add to map AFTER all features are loaded
-        finishLayerRendering(leafletLayer, layer, storeLayer, worker, globalStartTime);
+        finishLayerRendering(
+          leafletLayer,
+          layer,
+          storeLayer,
+          worker,
+          globalStartTime,
+        );
       }
     };
 
@@ -237,39 +279,51 @@ export function useLayerManager(map) {
   };
 
   // NEW: Separate function to add layer to map after all features loaded
-  const finishLayerRendering = async (leafletLayer, layer, storeLayer, worker, startTime) => {
+  const finishLayerRendering = async (
+    leafletLayer,
+    layer,
+    storeLayer,
+    worker,
+    startTime,
+  ) => {
     if (__APP_DEBUG__) {
       const totalTime = (performance.now() - startTime).toFixed(0);
-      console.debug(`[LayerManager - ${layer.name}] ✅ All features loaded in ${totalTime}ms`);
+      console.debug(
+        `[LayerManager - ${layer.name}] ✅ All features loaded in ${totalTime}ms`,
+      );
       console.debug(`[LayerManager - ${layer.name}] 🗺️ Adding to map...`);
     }
 
     // Update status to "ready" BEFORE adding to map
     if (storeLayer) {
-      layerStore.setLayerStatus(layer.id, "ready");
-      layerStore.setLayerProgress(layer.id, 100);
+      layerStore.setLayerStatus(layer._layerId, "ready");
+      layerStore.setLayerProgress(layer._layerId, 100);
     }
 
     // Add to map in next frame to avoid blocking
     await nextTick();
-    
+
     requestAnimationFrame(() => {
       // Only add if layer is still active
       if (storeLayer && storeLayer.active) {
         leafletLayer.addTo(map);
-        
+
         if (__APP_DEBUG__) {
           const finalTime = (performance.now() - startTime).toFixed(0);
-          console.debug(`[LayerManager - ${layer.name}] ✨ Fully rendered & visible in ${finalTime}ms`);
+          console.debug(
+            `[LayerManager - ${layer.name}] ✨ Fully rendered & visible in ${finalTime}ms`,
+          );
           console.groupEnd();
         }
       } else if (__APP_DEBUG__) {
-        console.debug(`[LayerManager - ${layer.name}] ⏸️ Layer loaded but not visible (inactive)`);
+        console.debug(
+          `[LayerManager - ${layer.name}] ⏸️ Layer loaded but not visible (inactive)`,
+        );
         console.groupEnd();
       }
-      
+
       // Cleanup worker
-      activeWorkers.delete(layer.id);
+      activeWorkers.delete(layer._layerId);
       worker.terminate();
     });
   };
@@ -278,7 +332,9 @@ export function useLayerManager(map) {
   const cleanup = () => {
     activeWorkers.forEach((worker, layerId) => {
       if (__APP_DEBUG__) {
-        console.debug(`[LayerManager] 🧹 Terminating worker for layer: ${layerId}`);
+        console.debug(
+          `[LayerManager] 🧹 Terminating worker for layer: ${layerId}`,
+        );
       }
       worker.terminate();
     });

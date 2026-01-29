@@ -22,6 +22,27 @@
           {{ featureTitle }}
         </h2>
 
+        <div class="feature-actions" v-if="hasActions">
+          <a
+            v-if="downloadUrl"
+            :href="downloadUrl"
+            download
+            class="action-btn"
+            title="Download Image"
+          >
+            <span class="icon">⬇️</span>
+          </a>
+          <a
+            v-if="model3dUrl"
+            :href="model3dUrl"
+            target="_blank"
+            class="action-btn"
+            title="View 3D Model"
+          >
+            <span class="icon">📦</span>
+          </a>
+        </div>
+
         <table class="attr-table">
           <tbody>
             <tr v-for="(value, key) in displayProperties" :key="key">
@@ -75,7 +96,9 @@ const featureTitle = computed(() => {
   if (!props?._layerId) return null;
 
   const layer = layerStore.layers.find((l) => l._layerId === props._layerId);
-  const headerKey = layer?.headerProperty;
+  console.log("Associated Layer:", layer);
+  const metadata = layer?.metadata || {};
+  const headerKey = metadata.headerAttribute;
 
   // Return the value if the key exists in properties, otherwise null
   return headerKey && props[headerKey] ? props[headerKey] : null;
@@ -151,6 +174,37 @@ const featureTitle = computed(() => {
   border-bottom: 2px solid #eee;
   padding-bottom: 10px;
   margin-bottom: 15px;
+  text-align: center;
+}
+
+.feature-actions {
+  display: flex;
+  justify-content: center;
+  gap: 20px;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #eee;
+}
+
+.action-btn {
+  text-decoration: none;
+  font-size: 1.5rem;
+  transition: transform 0.2s ease;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 45px;
+  height: 45px;
+  background: #f8f9fa;
+  border-radius: 50%;
+  border: 1px solid #ddd;
+}
+
+.action-btn:hover {
+  transform: scale(1.1);
+  background: #e9ecef;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
 .attr-table {
