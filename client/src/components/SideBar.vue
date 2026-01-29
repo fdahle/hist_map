@@ -17,7 +17,11 @@
         @contextmenu.prevent="handleRightClick($event, layer)"
       >
         <div
-          v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
+          v-if="
+            ['downloading', 'processing', 'loading-details'].includes(
+              layer.status
+            )
+          "
           class="progress-bg"
         >
           <div
@@ -32,14 +36,23 @@
             type="checkbox"
             :checked="layer.active"
             :disabled="
-              ['downloading', 'processing', 'error', 'loading-details'].includes(layer.status)
+              [
+                'downloading',
+                'processing',
+                'error',
+                'loading-details',
+              ].includes(layer.status)
             "
             @change="layerStore.toggleLayer(layer.id)"
           />
 
           <span class="icon-container">
             <div
-              v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
+              v-if="
+                ['downloading', 'processing', 'loading-details'].includes(
+                  layer.status
+                )
+              "
               class="spinner"
             ></div>
 
@@ -109,7 +122,7 @@
                 (Loading {{ layer.progress }}%)
               </small>
             </span>
-            
+
             <!-- ADDED: Action buttons for error and loading states -->
             <div class="action-buttons">
               <button
@@ -120,9 +133,13 @@
               >
                 🔄
               </button>
-              
+
               <button
-                v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
+                v-if="
+                  ['downloading', 'processing', 'loading-details'].includes(
+                    layer.status
+                  )
+                "
                 class="action-btn cancel-btn"
                 title="Cancel loading"
                 @click.stop="handleCancel(layer.id)"
@@ -229,9 +246,13 @@ const handleCancel = (layerId) => {
 }
 
 .header {
-  padding: 15px;
+  padding: 0 15px; /* Vertical padding removed to use height/flex */
   background: #343a40;
   color: white;
+  height: 48px; /* Standardized height */
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
 }
 
 .header h3 {

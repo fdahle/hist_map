@@ -35,10 +35,6 @@ overlay_layers:
     type: "geojson"
     url: "http://localhost:3000/data/georef_sat.geojson"
     visible: true
-  - name: "Antarctic Coastlines"
-    type: "geojson"
-    url: "http://localhost:3000/data/coastline.geojson"
-    visible: true
   - name: "Research Stations"
     type: "geojson"
     url: "http://localhost:3000/data/stations.geojson"

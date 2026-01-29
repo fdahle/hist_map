@@ -33,7 +33,7 @@ export const useLayerStore = defineStore("layers", () => {
     url = null,
   ) => {
     // skip if layer with same ID already exists
-    if (layers.value.some((l) => l.id === id)) return;
+    if (layers.value.some((l) => l._layer_id === id)) return;
 
     // Determine initial status
     let initialStatus = "ready";

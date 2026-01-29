@@ -46,7 +46,7 @@ export function useLayerManager(map) {
         layerConf.url
       );
 
-      const storeLayer = layerStore.layers.find((l) => l.id === layerId);
+      const storeLayer = layerStore.layers.find((l) => l._layerId === layerId);
       if (storeLayer && storeLayer.active) {
         leafletLayer.addTo(map);
       }
@@ -162,7 +162,7 @@ export function useLayerManager(map) {
       },
       onEachFeature: (feature, lLayer) => {
         if (!feature.properties._id) feature.properties._id = generateUUID();
-        feature.properties._layerId = layer._id;
+        feature.properties._layerId = layer._layerId;
         layerRegistry[feature.properties._id] = lLayer;
         lLayer.on("click", (e) => {
           L.DomEvent.stopPropagation(e);
@@ -172,7 +172,7 @@ export function useLayerManager(map) {
     });
 
     // Store the layer instance immediately
-    const storeLayer = layerStore.layers.find((l) => l.id === layer.id);
+    const storeLayer = layerStore.layers.find((l) => l.layerId === layer.id);
     if (storeLayer) {
       storeLayer.layerInstance = leafletLayer;
       storeLayer.geometryType = geometryType;

@@ -18,8 +18,8 @@
           />
         </div>
 
-        <h2 class="feature-title">
-          {{ selectedFeature.properties.name || "Unnamed Feature" }}
+        <h2 v-if="featureTitle" class="feature-title">
+          {{ featureTitle }}
         </h2>
 
         <table class="attr-table">
@@ -39,15 +39,19 @@
 import { computed } from "vue"; // Import computed
 import { storeToRefs } from "pinia";
 import { useSelectionStore } from "../stores/selectionStore";
+import { useLayerStore } from "../stores/layerStore"; // 1. Add this import
 import { formatKey } from "../composables/utils";
 
 const selectionStore = useSelectionStore();
+const layerStore = useLayerStore();
 const { selectedFeature } = storeToRefs(selectionStore);
 const { clearSelection } = selectionStore;
 
-// 2. Computed property to handle all filtering logic
+// Computed property to handle all filtering logic
 const displayProperties = computed(() => {
   if (!selectedFeature.value?.properties) return {};
+
+  console.log("Selected Feature Properties:", selectedFeature.value.properties);
 
   const props = selectedFeature.value.properties;
 
@@ -63,6 +67,18 @@ const displayProperties = computed(() => {
       obj[key] = props[key];
       return obj;
     }, {});
+});
+
+// Optional: Computed property for feature title
+const featureTitle = computed(() => {
+  const props = selectedFeature.value?.properties;
+  if (!props?._layerId) return null;
+
+  const layer = layerStore.layers.find((l) => l.layerId === props._layerId);
+  const headerKey = layer?.headerProperty;
+
+  // Return the value if the key exists in properties, otherwise null
+  return headerKey && props[headerKey] ? props[headerKey] : null;
 });
 </script>
 
@@ -81,20 +97,26 @@ const displayProperties = computed(() => {
 }
 
 .panel-header {
-  padding: 15px;
+  padding: 0 15px; /* Consistent with Sidebar */
   background: #343a40;
   color: white;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  height: 48px; /* Matches Sidebar height */
+  box-sizing: border-box;
 }
 
+/* Ensure the close button doesn't stretch the box */
 .close-btn {
   background: none;
   border: none;
   color: white;
-  font-size: 24px;
+  font-size: 20px; /* Slightly reduced to prevent overflow */
   cursor: pointer;
+  line-height: 1;
+  display: flex;
+  align-items: center;
 }
 
 .panel-content {
