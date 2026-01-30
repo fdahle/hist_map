@@ -4,9 +4,9 @@
 
 # 1. Map View Settings
 view:
-  center: [0, 0]        # Centered directly on the South Pole
+  center: [-2000000, 1000000]        # Centered directly on the South Pole
   zoom: 1                 # Zoom levels differ in polar projections
-  minZoom: 0
+  minZoom: 2
   maxZoom: 12
   extent: [-4194304, -4194304, 4194304, 4194304]  # Full extent for Antarctica view
   
@@ -14,25 +14,33 @@ view:
 crs: "EPSG:3031"
 projection_params:
   proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-  extent: [-4194304, -4194304, 4194304, 4194304]
+  extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
   resolutions: [8192, 4096, 2048, 1024, 512, 256, 128, 64]
 
 # 3. Base Map Layers (Using GBIF Polar Tiles)
 base_layers:
-  - name: "OpenStreetMap"
+  - name: "OSM"
     type: "tile"
     url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=osm-bright-en"
     visible: true
     tileSize: 512
     attribution: "© OpenStreetMap contributors"    
+    crs_options:
+      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
+      resolutions: [8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1]
+      proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
 
-  - name: "NASA MODIS (Antarctica)"
+  - name: "MODIS"
     type: "tile"
     url: "https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/2013-12-01/250m/{z}/{y}/{x}.jpg"
     visible: false
     tileSize: 512
     attribution: "NASA Global Imagery Browse Services (GIBS)"
-
+    crs_options:
+      extent: [-4194304, -4194304, 4194304, 4194304]
+      resolutions: [16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64]
+      proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+  
   - name: "Geyser"
     type: "tile"
     url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-geyser"

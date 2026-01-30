@@ -12,6 +12,7 @@ view:
 # 2. Coordinate Reference System
 # Options: EPSG3857 (Standard), EPSG4326 (Flat), Simple (Grid)
 crs: "EPSG3857"
+projection_params:
 
 # 3. Base Map Layers
 base_layers:

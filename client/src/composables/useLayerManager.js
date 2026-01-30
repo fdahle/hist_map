@@ -1,348 +1,169 @@
 // client/src/composables/useLayerManager.js
-import L from "leaflet";
-import { watch, nextTick } from "vue";
+import { watch } from "vue";
 import { useLayerStore } from "../stores/layerStore";
 import { useSelectionStore } from "../stores/selectionStore";
-import { createSvgPin, generateUUID } from "./utils";
+import { createPinStyle, generateUUID } from "./utils";
+
+// OpenLayers Imports
+import TileLayer from "ol/layer/Tile";
+import VectorLayer from "ol/layer/Vector";
+import XYZ from "ol/source/XYZ";
+import VectorSource from "ol/source/Vector";
+import GeoJSON from "ol/format/GeoJSON";
+import { Style, Stroke, Fill, Circle as CircleStyle } from "ol/style";
+import { transformExtent } from "ol/proj";
 
 export function useLayerManager(map) {
   const layerStore = useLayerStore();
   const selectionStore = useSelectionStore();
-  const layerRegistry = {};
+  const layerRegistry = {}; // Maps feature ID -> OL Feature
   const activeWorkers = new Map();
 
-  // Watcher for Lazy Loading
+  // Watcher to trigger downloads
   watch(
     () => layerStore.layers,
     (layers) => {
       layers.forEach((layer) => {
-        if (
-          layer.active &&
-          layer.status === "idle" &&
-          layer.type === "geojson"
-        ) {
+        if (layer.active && layer.status === "idle" && layer.type === "geojson") {
           loadGeoJsonLayer(layer);
         }
       });
     },
-    { deep: true },
+    { deep: true }
   );
 
   const processLayer = async (layerConf, category) => {
     const layerId = layerConf._layerId || generateUUID();
 
-    // TILE LAYERS
+    // --- TILE LAYERS ---
     if (layerConf.type === "tile") {
-      const leafletLayer = L.tileLayer(layerConf.url, {
-        attribution: layerConf.attribution,
-        // Use config value or default to standard Leaflet 256
-        tileSize: layerConf.tileSize || 256,
+      // Handle Custom Grids (NASA / GBIF) if 'crs_options' exists
+      // For simplicity, we stick to standard XYZ, which works for 90% of cases
+      // If you need the specific matrix sets, we can add WMTSTileGrid later.
+      
+      const source = new XYZ({
+        url: layerConf.url,
+        attributions: layerConf.attribution,
+        projection: map.getView().getProjection(), // Align with map projection
+        wrapX: layerConf.noWrap !== true,
+      });
+
+      const olLayer = new TileLayer({
+        source: source,
+        visible: layerConf.visible,
+        properties: { name: layerConf.name, id: layerId }
       });
 
       layerStore.addLayer(
-        layerId,
-        layerConf.name,
-        leafletLayer,
-        "tile",
-        category,
-        layerConf.visible,
-        "tile",
-        null,
-        layerConf.url,
+        layerId, layerConf.name, olLayer, "tile", category, layerConf.visible, "tile", null, layerConf.url
       );
 
-      const storeLayer = layerStore.layers.find((l) => l._layerId === layerId);
-      if (storeLayer && storeLayer.active) {
-        leafletLayer.addTo(map);
+      if (layerConf.visible) {
+        map.addLayer(olLayer);
       }
-      return;
     }
 
-    // GEOJSON LAYERS
+    // --- GEOJSON LAYERS ---
     if (layerConf.type === "geojson") {
+      // Placeholder for Vector Layer
       layerStore.addLayer(
-        layerId,
-        layerConf.name,
-        null,
-        "geojson",
-        category,
-        layerConf.visible,
-        "unknown",
-        layerConf.color,
-        layerConf.url,
+        layerId, layerConf.name, null, "geojson", category, layerConf.visible, "unknown", layerConf.color, layerConf.url
       );
     }
   };
 
   const loadGeoJsonLayer = (layer) => {
-    if (__APP_DEBUG__) {
-      console.group(`[LayerManager] 🔥 Start Loading: "${layer.name}"`);
-      console.debug(`ID: ${layer._layerId}`);
-      console.debug(`URL: ${layer.url}`);
-    }
-
-    // Cancel existing worker if layer is being reloaded
-    if (activeWorkers.has(layer._layerId)) {
-      activeWorkers.get(layer._layerId).terminate();
-      activeWorkers.delete(layer._layerId);
-    }
-
     layerStore.setLayerStatus(layer._layerId, "downloading");
 
-    const worker = new Worker(
-      new URL("../workers/layerWorker.js", import.meta.url),
-      { type: "module" },
-    );
-
+    const worker = new Worker(new URL("../workers/layerWorker.js", import.meta.url), { type: "module" });
     activeWorkers.set(layer._layerId, worker);
 
     worker.postMessage({
       url: layer.url,
       layerId: layer._layerId,
       layerName: layer.name,
-      debug: __APP_DEBUG__,
     });
 
     worker.onmessage = (e) => {
       const { type, progress, data, error } = e.data;
-
-      if (type === "PROGRESS") {
-        layerStore.setLayerProgress(layer._layerId, progress);
-      } else if (type === "SUCCESS") {
-        if (__APP_DEBUG__)
-          console.debug(
-            `[LayerManager - ${layer.name}] ✅ Worker finished downloading & parsing.`,
-          );
-
+      if (type === "PROGRESS") layerStore.setLayerProgress(layer._layerId, progress);
+      if (type === "SUCCESS") {
         layerStore.setLayerStatus(layer._layerId, "processing");
-        layerStore.setLayerProgress(layer._layerId, 0);
         finalizeGeoJsonLayer(data, layer, worker);
-      } else if (type === "ERROR") {
-        if (__APP_DEBUG__)
-          console.debug(
-            `[LayerManager - ${layer.name}] ❌ Worker Error:`,
-            error,
-          );
-
-        console.error(
-          `[LayerManager - ${layer.name}] Error loading layer:`,
-          error,
-        );
-        layerStore.setLayerError(
-          layer._layerId,
-          error || "Failed to fetch file",
-        );
-
-        activeWorkers.delete(layer._layerId);
+      }
+      if (type === "ERROR") {
+        console.error("Worker Error:", error);
+        layerStore.setLayerError(layer._layerId, error);
         worker.terminate();
-
-        if (__APP_DEBUG__) console.groupEnd();
       }
-    };
-
-    worker.onerror = (err) => {
-      console.error(`[LayerManager - ${layer.name}] Worker crashed:`, err);
-      layerStore.setLayerError(layer._layerId, "Worker crashed");
-      activeWorkers.delete(layer._layerId);
-      worker.terminate();
-      if (__APP_DEBUG__) console.groupEnd();
     };
   };
 
-  const finalizeGeoJsonLayer = async (data, layer, worker) => {
-    const geometryType = data.features?.[0]?.geometry?.type || "Unknown";
-    const totalFeatures = Array.isArray(data.features)
-      ? data.features.length
-      : 1;
-
-    if (__APP_DEBUG__) {
-      console.debug(
-        `[LayerManager - ${layer.name}] ⚙️ Processing ${totalFeatures} features for rendering...`,
-      );
-    }
-
-    // CRITICAL: Create layer but DON'T add to map yet
-    const leafletLayer = L.geoJSON(null, {
-      /*
-      coordsToLatLng: (coords) => {
-        const crs = map.options.crs;
-        if (crs.projection && typeof crs.unproject === "function") {
-          return crs.unproject(L.point(coords[0], coords[1]));
-        }
-        return L.GeoJSON.coordsToLatLng(coords);
-      },
-      */
-      style: () => ({
-        color: layer.color || "#3388ff",
-        weight: 2,
-        fillOpacity: 0.5,
-      }),
-      pointToLayer: (feature, latlng) => {
-        return L.marker(latlng, {
-          icon: createSvgPin(layer.color || "#3388ff"),
-        });
-      },
-      onEachFeature: (feature, lLayer) => {
-        if (!feature.properties._featureId)
-          feature.properties._featureId = generateUUID();
-        feature.properties._layerId = layer._layerId;
-        layerRegistry[feature.properties._featureId] = lLayer;
-        lLayer.on("click", (e) => {
-          L.DomEvent.stopPropagation(e);
-          selectionStore.selectFeature(feature);
-        });
-      },
+  const finalizeGeoJsonLayer = (geoJsonData, layer, worker) => {
+    // 1. Parse GeoJSON (OpenLayers handles projection automatically if featureProjection is set)
+    const format = new GeoJSON();
+    const features = format.readFeatures(geoJsonData, {
+      featureProjection: map.getView().getProjection() // Transform to Map Projection
     });
 
-    // Store the layer instance immediately
-    const storeLayer = layerStore.layers.find(
-      (l) => l._layerId === layer._layerId,
-    );
-    if (storeLayer) {
-      storeLayer.layerInstance = leafletLayer;
-      storeLayer.geometryType = geometryType;
-
-      // add metadata if available
-      if (data.metadata) {
-        storeLayer.metadata = data.metadata;
-      }
-    }
-
-    // --- TIME-BUDGETED BATCH PROCESSING ---
-    const features = Array.isArray(data.features) ? data.features : [data];
-    let index = 0;
-
-    // Performance settings optimized for your glaciers
-    const TIME_BUDGET_MS = 6; // Even shorter for better responsiveness
-    const UPDATE_THRESHOLD = 15; // Update every 15% to reduce reactivity
-    let lastProgressUpdate = 0;
-    const globalStartTime = performance.now();
-
-    // For very large datasets, show preview first
-    const PREVIEW_THRESHOLD = 5000;
-    if (features.length > PREVIEW_THRESHOLD) {
-      if (__APP_DEBUG__) {
-        console.debug(
-          `[LayerManager - ${layer.name}] 📸 Large dataset detected (${totalFeatures} features). Showing preview...`,
-        );
-      }
-
-      const previewFeatures = features.filter((_, i) => i % 10 === 0);
-      leafletLayer.addData(previewFeatures);
-      layerStore.setLayerStatus(layer._layerId, "loading-details");
-
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-
-    const processBatch = () => {
-      const startTime = performance.now();
-
-      while (index < features.length) {
-        // REDUCED: Even smaller batches for complex polygons
-        const batchSize = 5; // Your glaciers are complex, use smaller batches
-        const end = Math.min(index + batchSize, features.length);
-
-        leafletLayer.addData(features.slice(index, end));
-        index = end;
-
-        if (performance.now() - startTime > TIME_BUDGET_MS) {
-          break;
-        }
-      }
-
-      const currentProgress = Math.round((index / features.length) * 100);
-      if (
-        storeLayer &&
-        (currentProgress - lastProgressUpdate >= UPDATE_THRESHOLD ||
-          index === features.length)
-      ) {
-        layerStore.setLayerProgress(
-          layer._layerId,
-          currentProgress,
-          "processing",
-        );
-        lastProgressUpdate = currentProgress;
-      }
-
-      if (index < features.length) {
-        requestAnimationFrame(processBatch);
-      } else {
-        // CRITICAL FIX: Only add to map AFTER all features are loaded
-        finishLayerRendering(
-          leafletLayer,
-          layer,
-          storeLayer,
-          worker,
-          globalStartTime,
-        );
-      }
-    };
-
-    requestAnimationFrame(processBatch);
-  };
-
-  // NEW: Separate function to add layer to map after all features loaded
-  const finishLayerRendering = async (
-    leafletLayer,
-    layer,
-    storeLayer,
-    worker,
-    startTime,
-  ) => {
-    if (__APP_DEBUG__) {
-      const totalTime = (performance.now() - startTime).toFixed(0);
-      console.debug(
-        `[LayerManager - ${layer.name}] ✅ All features loaded in ${totalTime}ms`,
-      );
-      console.debug(`[LayerManager - ${layer.name}] 🗺️ Adding to map...`);
-    }
-
-    // Update status to "ready" BEFORE adding to map
-    if (storeLayer) {
-      layerStore.setLayerStatus(layer._layerId, "ready");
-      layerStore.setLayerProgress(layer._layerId, 100);
-    }
-
-    // Add to map in next frame to avoid blocking
-    await nextTick();
-
-    requestAnimationFrame(() => {
-      // Only add if layer is still active
-      if (storeLayer && storeLayer.active) {
-        leafletLayer.addTo(map);
-
-        if (__APP_DEBUG__) {
-          const finalTime = (performance.now() - startTime).toFixed(0);
-          console.debug(
-            `[LayerManager - ${layer.name}] ✨ Fully rendered & visible in ${finalTime}ms`,
-          );
-          console.groupEnd();
-        }
-      } else if (__APP_DEBUG__) {
-        console.debug(
-          `[LayerManager - ${layer.name}] ⏸️ Layer loaded but not visible (inactive)`,
-        );
-        console.groupEnd();
-      }
-
-      // Cleanup worker
-      activeWorkers.delete(layer._layerId);
-      worker.terminate();
+    // 2. Assign IDs and Styles
+    const baseColor = layer.color || "#3388ff";
+    
+    // Default Vector Style
+    const vectorStyle = new Style({
+        stroke: new Stroke({ color: baseColor, width: 2 }),
+        fill: new Fill({ color: baseColor + "80" }) // Add transparency hex
     });
+    
+    // Pin Style for Points
+    const pinStyle = createPinStyle(baseColor);
+
+    features.forEach(feature => {
+      // Ensure ID
+      const fid = feature.get("id") || generateUUID();
+      feature.setId(fid);
+      feature.set("_layerId", layer._layerId);
+      feature.set("_featureId", fid);
+      
+      // Store in registry for quick lookup
+      layerRegistry[fid] = feature;
+    });
+
+    // 3. Create Source and Layer
+    const source = new VectorSource({
+      features: features
+    });
+
+    const olLayer = new VectorLayer({
+      source: source,
+      visible: layer.active, // Only show if active
+      style: (feature) => {
+          // Dynamic Style Function
+          if (feature.getGeometry().getType() === "Point") return pinStyle;
+          return vectorStyle;
+      },
+      properties: { id: layer._layerId }
+    });
+
+    // 4. Update Store
+    const storeLayer = layerStore.layers.find(l => l._layerId === layer._layerId);
+    if (storeLayer) {
+        storeLayer.layerInstance = olLayer;
+        storeLayer.status = "ready";
+        
+        if (storeLayer.active) {
+            map.addLayer(olLayer);
+        }
+    }
+
+    worker.terminate();
+    activeWorkers.delete(layer._layerId);
   };
 
-  // Cleanup function to terminate all workers
   const cleanup = () => {
-    activeWorkers.forEach((worker, layerId) => {
-      if (__APP_DEBUG__) {
-        console.debug(
-          `[LayerManager] 🧹 Terminating worker for layer: ${layerId}`,
-        );
-      }
-      worker.terminate();
-    });
+    activeWorkers.forEach(w => w.terminate());
     activeWorkers.clear();
   };
 
-  return { processLayer, layerRegistry, cleanup };
+  return { processLayer, cleanup, layerRegistry };
 }

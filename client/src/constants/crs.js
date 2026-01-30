@@ -1,27 +1,28 @@
 // client/src/constants/crs.js
-import L from "leaflet";
-import "proj4leaflet";
+import proj4 from "proj4";
+import { register } from "ol/proj/proj4";
+import { get as getProjection } from "ol/proj";
 
-export const getProjectedCRS = (config) => {
+export const registerCustomProjections = (config) => {
   const code = config.crs;
   const params = config.projection_params;
 
-  // 1. Handle standard Leaflet CRS
-  if (code === "EPSG3857") return L.CRS.EPSG3857;
-  if (code === "EPSG4326") return L.CRS.EPSG4326;
-
-  // 2. Handle Custom Projected CRS (like EPSG:3031)
-  if (params && params.proj_string) {
-    const [minX, minY, maxX, maxY] = params.extent;
-    const bounds = L.bounds(L.point(minX, minY), L.point(maxX, maxY));
-
-    return new L.Proj.CRS(code, params.proj_string, {
-      origin: [minX, maxY], // Top-left corner
-      resolutions: params.resolutions,
-      bounds: bounds
-    });
+  // If it's a standard projection, just return the code
+  if (!params || !params.proj_string) {
+    return code || "EPSG:3857";
   }
 
-  // Fallback
-  return L.CRS.EPSG3857;
+  // 1. Define the projection in Proj4
+  proj4.defs(code, params.proj_string);
+  
+  // 2. Register it with OpenLayers
+  register(proj4);
+
+  // 3. Configure the extent if provided
+  const projection = getProjection(code);
+  if (params.extent) {
+    projection.setExtent(params.extent);
+  }
+
+  return code;
 };

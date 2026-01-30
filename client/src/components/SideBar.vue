@@ -17,11 +17,7 @@
         @contextmenu.prevent="handleRightClick($event, layer)"
       >
         <div
-          v-if="
-            ['downloading', 'processing', 'loading-details'].includes(
-              layer.status
-            )
-          "
+          v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
           class="progress-bg"
         >
           <div
@@ -35,66 +31,29 @@
           <input
             type="checkbox"
             :checked="layer.active"
-            :disabled="
-              [
-                'downloading',
-                'processing',
-                'error',
-                'loading-details',
-              ].includes(layer.status)
-            "
+            :disabled="['downloading', 'processing', 'error', 'loading-details'].includes(layer.status)"
             @change="layerStore.toggleLayer(layer._layerId)"
           />
 
           <span class="icon-container">
             <div
-              v-if="
-                ['downloading', 'processing', 'loading-details'].includes(
-                  layer.status
-                )
-              "
+              v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
               class="spinner"
             ></div>
 
             <span
               v-else
               class="geom-icon"
-              :style="{
-                color:
-                  layer.status === 'error' ? '#ccc' : layer.color || '#666',
-              }"
+              :style="{ color: layer.status === 'error' ? '#ccc' : layer.color || '#666' }"
             >
-              <svg
-                v-if="getIconType(layer.geometryType) === 'point'"
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-              >
+              <svg v-if="getIconType(layer.geometryType) === 'point'" viewBox="0 0 24 24" width="16" height="16">
                 <circle cx="12" cy="12" r="6" fill="currentColor" />
               </svg>
-              <svg
-                v-else-if="getIconType(layer.geometryType) === 'line'"
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-              >
-                <path
-                  d="M3 17 L9 7 L15 17 L21 7"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                  fill="none"
-                />
+              <svg v-else-if="getIconType(layer.geometryType) === 'line'" viewBox="0 0 24 24" width="16" height="16">
+                <path d="M3 17 L9 7 L15 17 L21 7" stroke="currentColor" stroke-width="2.5" fill="none" />
               </svg>
               <svg v-else viewBox="0 0 24 24" width="16" height="16">
-                <rect
-                  x="4"
-                  y="4"
-                  width="16"
-                  height="16"
-                  rx="2"
-                  fill="currentColor"
-                  opacity="0.5"
-                />
+                <rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor" opacity="0.5" />
               </svg>
             </span>
           </span>
@@ -105,43 +64,25 @@
               :style="{ color: layer.status === 'error' ? '#888' : 'inherit' }"
             >
               {{ layer.name }}
-
-              <small v-if="layer.status === 'downloading'" class="loading-text">
-                (DL {{ layer.progress }}%)
-              </small>
-              <small
-                v-else-if="layer.status === 'processing'"
-                class="loading-text"
-              >
-                (Proc {{ layer.progress }}%)
-              </small>
-              <small
-                v-else-if="layer.status === 'loading-details'"
-                class="loading-text"
-              >
-                (Loading {{ layer.progress }}%)
-              </small>
+              <small v-if="layer.status === 'downloading'" class="loading-text">(DL {{ layer.progress }}%)</small>
+              <small v-else-if="layer.status === 'processing'" class="loading-text">(Proc {{ layer.progress }}%)</small>
+              <small v-else-if="layer.status === 'loading-details'" class="loading-text">(Load {{ layer.progress }}%)</small>
             </span>
 
-            <!-- ADDED: Action buttons for error and loading states -->
             <div class="action-buttons">
               <button
                 v-if="layer.status === 'error'"
                 class="action-btn retry-btn"
-                :title="layer.error || 'Click to retry'"
+                title="Retry"
                 @click.stop="handleRetry(layer._layerId)"
               >
                 🔄
               </button>
 
               <button
-                v-if="
-                  ['downloading', 'processing', 'loading-details'].includes(
-                    layer.status
-                  )
-                "
+                v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
                 class="action-btn cancel-btn"
-                title="Cancel loading"
+                title="Cancel"
                 @click.stop="handleCancel(layer._layerId)"
               >
                 ✕
@@ -177,6 +118,7 @@ import { storeToRefs } from "pinia";
 import { useLayerStore } from "../stores/layerStore";
 import { useMapStore } from "../stores/mapStore";
 import ContextMenu from "./ContextMenu.vue";
+import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
 
 defineEmits(['open-settings']);
 
@@ -190,7 +132,7 @@ const getIconType = (layerType) => {
   const type = layerType?.toLowerCase() || "unknown";
   if (type.includes("point")) return "point";
   if (type.includes("line")) return "line";
-  return "unknown"; // Default icon for unknown or polygon
+  return "unknown";
 };
 
 const handleRightClick = (event, layer) => {
@@ -201,21 +143,42 @@ const handleRightClick = (event, layer) => {
 const handleMenuAction = ({ type, layer }) => {
   if (!layer.layerInstance) return;
 
+  // --- ZOOM ACTION (OpenLayers) ---
   if (type === "zoom") {
     const map = mapStore.getMap();
     if (map) {
-      const bounds = layer.layerInstance.getBounds();
-      if (bounds.isValid()) {
-        map.flyToBounds(bounds, { padding: [50, 50] });
+      const source = layer.layerInstance.getSource();
+      if (source) {
+        const extent = source.getExtent();
+        // Check if extent is valid (not infinite)
+        if (extent && extent[0] !== Infinity) {
+             map.getView().fit(extent, { 
+                 padding: [50, 50, 50, 50], 
+                 duration: 1000 // Smooth animation
+             });
+        }
       }
     }
   }
 
+  // --- DOWNLOAD ACTION (OpenLayers) ---
   if (type === "download") {
-    const geojson = layer.layerInstance.toGeoJSON();
-    const dataStr =
-      "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(geojson));
+    const source = layer.layerInstance.getSource();
+    const features = source.getFeatures();
+    
+    // Create GeoJSON writer
+    const format = new GeoJSON();
+    
+    // Write features to object, transforming Projection -> Lat/Lon
+    const map = mapStore.getMap();
+    const projection = map.getView().getProjection();
+    
+    const geojsonObj = format.writeFeaturesObject(features, {
+        dataProjection: 'EPSG:4326', // Output as standard Lat/Lon
+        featureProjection: projection // Input is current Map Projection
+    });
+
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(geojsonObj));
     const el = document.createElement("a");
     el.setAttribute("href", dataStr);
     el.setAttribute("download", `${layer.name}.json`);
@@ -229,18 +192,17 @@ const handleColorChange = ({ color, layer }) => {
   layerStore.updateLayerColor(layer._layerId, color);
 };
 
-// ADDED: Retry handler
 const handleRetry = (layerId) => {
   layerStore.retryLayer(layerId);
 };
 
-// ADDED: Cancel handler
 const handleCancel = (layerId) => {
   layerStore.cancelLayerLoad(layerId);
 };
 </script>
 
 <style scoped>
+/* Keeping your exact styles as they are perfect */
 .sidebar {
   width: 280px;
   height: 100%;
@@ -255,10 +217,10 @@ const handleCancel = (layerId) => {
 }
 
 .header {
-  padding: 0 15px; /* Vertical padding removed to use height/flex */
+  padding: 0 15px;
   background: #343a40;
   color: white;
-  height: 48px; /* Standardized height */
+  height: 48px;
   display: flex;
   align-items: center;
   box-sizing: border-box;
@@ -297,7 +259,6 @@ const handleCancel = (layerId) => {
   border-left: 4px solid #007bff;
 }
 
-/* Idle state styling */
 .layer-row.is-idle .layer-name-text {
   color: #777;
 }
@@ -317,16 +278,16 @@ const handleCancel = (layerId) => {
 
 .progress-fill {
   height: 100%;
-  background: #17a2b8; /* Blue for downloading */
+  background: #17a2b8;
   transition: width 0.3s ease;
 }
 
 .progress-fill.processing {
-  background: #28a745; /* Green for processing */
+  background: #28a745;
 }
 
 .progress-fill.loading-details {
-  background: #ffc107; /* Yellow for loading details */
+  background: #ffc107;
 }
 
 .loading-text {
@@ -369,7 +330,6 @@ label {
   cursor: not-allowed;
 }
 
-/* ADDED: Action buttons styling */
 .action-buttons {
   display: flex;
   gap: 4px;
@@ -427,7 +387,6 @@ label {
   height: 100%;
 }
 
-/* Spinner Animation */
 .spinner {
   width: 14px;
   height: 14px;
@@ -452,7 +411,6 @@ input[type="checkbox"]:disabled {
   cursor: not-allowed;
 }
 
-/* Footer Styling */
 .sidebar-footer {
   padding: 10px;
   border-top: 1px solid #eee;
@@ -482,5 +440,4 @@ input[type="checkbox"]:disabled {
 .icon {
   font-size: 1.2rem;
 }
-
 </style>

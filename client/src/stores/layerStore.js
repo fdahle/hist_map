@@ -2,7 +2,10 @@
 import { defineStore } from "pinia";
 import { markRaw, ref, computed, nextTick } from "vue";
 import { useMapStore } from "./mapStore";
-import { createSvgPin } from "../composables/utils";
+// 1. Updated Import (OpenLayers Style Helper)
+import { createPinStyle } from "../composables/utils"; 
+// 2. OpenLayers Style Imports
+import { Style, Stroke, Fill } from "ol/style"; 
 
 // Simple debounce implementation
 function debounce(func, wait) {
@@ -32,10 +35,8 @@ export const useLayerStore = defineStore("layers", () => {
     color,
     url = null,
   ) => {
-    // skip if layer with same ID already exists
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
-    // Determine initial status
     let initialStatus = "ready";
     if (type === "geojson" && !layerInstance) {
       initialStatus = "idle";
@@ -47,6 +48,7 @@ export const useLayerStore = defineStore("layers", () => {
       type,
       category,
       active: isVisible,
+      // OpenLayers layers are objects too, markRaw is still good practice
       layerInstance: layerInstance ? markRaw(layerInstance) : null,
       geometryType: geometryType || "unknown",
       color: color || "#3388ff",
@@ -61,20 +63,17 @@ export const useLayerStore = defineStore("layers", () => {
     layers.value = [];
   };
 
-  // Debounced progress update to reduce reactivity overhead
   const debouncedProgressUpdates = new Map();
   
   const setLayerProgress = (layerId, progress) => {
     const layer = layers.value.find((l) => l._layerId === layerId);
     if (!layer) return;
 
-    // For 100% progress, update immediately (no debounce)
     if (progress === 100) {
       layer.progress = progress;
       return;
     }
 
-    // For other values, debounce to reduce reactivity triggers
     if (!debouncedProgressUpdates.has(layerId)) {
       debouncedProgressUpdates.set(
         layerId,
@@ -121,7 +120,7 @@ export const useLayerStore = defineStore("layers", () => {
     }
   };
 
-  // IMPROVED: Async toggle that doesn't block the UI
+  // 3. UPDATED: Toggle Logic using setVisible() instead of add/remove
   const toggleLayer = async (layerId) => {
     const layer = layers.value.find((l) => l._layerId === layerId);
 
@@ -134,64 +133,58 @@ export const useLayerStore = defineStore("layers", () => {
     )
       return;
 
-    const mapStore = useMapStore();
-    const map = mapStore.getMap();
-    if (!map) return;
-
+    // BASE LAYER LOGIC
     if (layer.category === "base") {
       if (layer.active) return;
+      
+      // Disable other base layers
       layers.value.forEach((l) => {
         if (l.category === "base" && l.active) {
           l.active = false;
-          if (l.layerInstance) map.removeLayer(l.layerInstance);
+          if (l.layerInstance) l.layerInstance.setVisible(false); // OL Method
         }
       });
+      
+      // Enable this one
       layer.active = true;
-      if (layer.layerInstance) map.addLayer(layer.layerInstance);
-    } else {
-      // CRITICAL FIX: Don't block UI on toggle
-      const targetState = !layer.active;
+      if (layer.layerInstance) layer.layerInstance.setVisible(true); // OL Method
+    } 
+    // OVERLAY LAYER LOGIC
+    else {
+      layer.active = !layer.active;
       
-      // Update state immediately for UI responsiveness
-      layer.active = targetState;
-      
-      // Defer the actual map operation to next tick
-      await nextTick();
-      
+      // Update OpenLayers Visibility
       if (layer.layerInstance) {
-        // Use requestAnimationFrame to ensure smooth transition
-        requestAnimationFrame(() => {
-          if (targetState) {
-            map.addLayer(layer.layerInstance);
-          } else {
-            map.removeLayer(layer.layerInstance);
-          }
-        });
+         layer.layerInstance.setVisible(layer.active);
       }
     }
   };
 
+  // 4. UPDATED: Color Update Logic for OpenLayers
   const updateLayerColor = (layerId, newColor) => {
     const layerObj = layers.value.find((l) => l._layerId === layerId);
     if (!layerObj || !layerObj.layerInstance) return;
 
     layerObj.color = newColor;
-    const leafletLayer = layerObj.layerInstance;
+    const olLayer = layerObj.layerInstance;
 
-    if (layerObj.type === "geojson" && leafletLayer.eachLayer) {
-      leafletLayer.eachLayer((featureLayer) => {
-        if (featureLayer.setStyle) {
-          featureLayer.setStyle({
-            color: newColor,
-            fillColor: newColor,
-            originalColor: newColor,
-            originalFillColor: newColor,
-          });
-        }
-        if (featureLayer instanceof L.Marker && featureLayer.setIcon) {
-          featureLayer.setIcon(createSvgPin(newColor));
-        }
-      });
+    // Define new styles with the new color
+    const newVectorStyle = new Style({
+        stroke: new Stroke({ color: newColor, width: 2 }),
+        fill: new Fill({ color: newColor + "80" }) // Add transparency
+    });
+    
+    const newPinStyle = createPinStyle(newColor);
+
+    // Apply via Style Function (Standard OL way to handle dynamic styles)
+    if (olLayer.setStyle) {
+        olLayer.setStyle((feature) => {
+            const type = feature.getGeometry().getType();
+            if (type === "Point" || type === "MultiPoint") {
+                return newPinStyle;
+            }
+            return newVectorStyle;
+        });
     }
   };
 

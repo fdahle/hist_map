@@ -6,169 +6,137 @@
 
 <script setup>
 import { onMounted, onUnmounted, inject, ref, watch } from "vue";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import "ol/ol.css"; // OpenLayers CSS
 
-// --- IMPORTS ---
-import { getProjectedCRS } from "../constants/crs";
+import Map from "ol/Map";
+import View from "ol/View";
+import { fromLonLat } from "ol/proj";
+import { defaults as defaultControls } from "ol/control";
+import { Select } from "ol/interaction";
+import { click } from "ol/events/condition";
+
+import { registerCustomProjections } from "../constants/crs";
 import { useMapStore } from "../stores/mapStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useLayerStore } from "../stores/layerStore";
-import { useLayerManager } from "../composables/useLayerManager"; // Import createSvgPin
-import { createSvgPin } from "../composables/utils";
+import { useLayerManager } from "../composables/useLayerManager";
+import { Stroke, Style, Fill } from "ol/style";
 
-// --- CONFIG & STORES ---
 const configRef = inject("config");
 const config = configRef.value;
 const mapStore = useMapStore();
 const selectionStore = useSelectionStore();
 const layerStore = useLayerStore();
 
-// --- STATE ---
 const mapContainer = ref(null);
 let map = null;
-let resizeObserver = null;
-let layerRegistry = null;
-let layerManagerCleanup = null; // ADDED: Store cleanup function
-
-/**
- * Updates the visual style of a Leaflet layer group.
- * Handles both Vector layers (setStyle) and Markers (setIcon).
- */
-const applyColorToLeafletLayer = (leafletLayer, newColor) => {
-  if (!leafletLayer || typeof leafletLayer.eachLayer !== "function") return;
-
-  leafletLayer.eachLayer((subLayer) => {
-    // 1. Handle Polygons / Lines / CircleMarkers
-    if (subLayer.setStyle) {
-      subLayer.setStyle({
-        color: newColor,
-        fillColor: newColor,
-        originalColor: newColor,
-        originalFillColor: newColor,
-      });
-    }
-
-    // 2. Handle Markers (Pins) - THIS WAS THE MISSING PART
-    if (subLayer instanceof L.Marker && subLayer.setIcon) {
-      subLayer.setIcon(createSvgPin(newColor));
-    }
-  });
-};
-
-// This function bridges the Sidebar's event to the Store and Map
-const handleColorChange = ({ color, layer }) => {
-  // 1. Update Pinia Store state (persistence)
-  layerStore.updateLayerColor(layer._layerId, color);
-
-  // 2. Update Map Visuals immediately
-  applyColorToLeafletLayer(layer.layerInstance, color);
-};
+let layerManager = null;
+let selectInteraction = null;
 
 onMounted(async () => {
   if (!mapContainer.value) return;
 
-  // The code is now projection-agnostic
-  const selectedCrs = getProjectedCRS(config);
+  // 1. Register Projections (e.g. EPSG:3031)
+  const projectionCode = registerCustomProjections(config);
 
-  map = L.map(mapContainer.value, {
-    crs: selectedCrs,
-    renderer: L.canvas({ tolerance: 5 }),
-    center: selectedCrs.unproject(L.point(config.view.center[0], config.view.center[1])), 
-    zoom: config.view.zoom,
-    maxBounds: selectedCrs.options.bounds || null, // Only bounds the map if defined
-    zoomControl: false,
+  // 2. Determine Center (Transform [Lat, Lon] -> Projection Units)
+  // Config usually provides [Lat, Lon]. OL View needs Projected Coords.
+  const centerLonLat = [config.view.center[1], config.view.center[0]]; // OL expects [Lon, Lat]
+  const centerProjected = fromLonLat(centerLonLat, projectionCode);
+
+  // 3. Initialize Map
+  map = new Map({
+    target: mapContainer.value,
+    controls: defaultControls({ zoom: false, attribution: false }),
+    layers: [], // Layers loaded via Manager
+    view: new View({
+      projection: projectionCode,
+      center: centerProjected,
+      zoom: config.view.zoom,
+      minZoom: config.view.minZoom,
+      maxZoom: config.view.maxZoom
+    })
   });
+  
   mapStore.setMap(map);
 
-  const manager = useLayerManager(map);
-  layerRegistry = manager.layerRegistry;
-  layerManagerCleanup = manager.cleanup; // ADDED: Store cleanup function
-
+  // 4. Initialize Manager
+  layerManager = useLayerManager(map);
+  
   const promises = [];
   if (config.base_layers) {
-    promises.push(
-      ...config.base_layers.map((l) => manager.processLayer(l, "base"))
-    );
+    promises.push(...config.base_layers.map(l => layerManager.processLayer(l, "base")));
   }
   if (config.overlay_layers) {
-    promises.push(
-      ...config.overlay_layers.map((l) => manager.processLayer(l, "overlay"))
-    );
+    promises.push(...config.overlay_layers.map(l => layerManager.processLayer(l, "overlay")));
   }
   await Promise.all(promises);
 
-  resizeObserver = new ResizeObserver(() => map.invalidateSize());
-  resizeObserver.observe(mapContainer.value);
+  // 5. Setup Selection Interaction
+  setupSelection();
 });
 
-// --- WATCHER (Selection Highlighting) ---
-watch(
-  () => selectionStore.selectedFeature,
-  (newFeature, oldFeature) => {
-    if (!layerRegistry) return;
+const setupSelection = () => {
+  // Highlight Style
+  const highlightStyle = new Style({
+    stroke: new Stroke({ color: "#FFFF00", width: 4 }), // Yellow Highlight
+    fill: new Fill({ color: "rgba(255, 255, 0, 0.3)" }),
+    zIndex: 999
+  });
 
-    // FIXED: Use _featureId instead of id
-    if (oldFeature?.properties?._featureId) {
-      const oldLayer = layerRegistry[oldFeature.properties._featureId];
-      if (oldLayer && oldLayer.setStyle) {
-        // Reset to the current layer color (not just hardcoded blue)
-        const parentLayer = layerStore.layers.find(
-          (l) => l._layerId === oldFeature.properties._layerId
-        );
-        const baseColor = parentLayer?.color || "#3388ff";
+  selectInteraction = new Select({
+    condition: click,
+    style: highlightStyle // Apply this style to selected features
+  });
 
-        oldLayer.setStyle({
-          weight: 2,
-          color: baseColor,
-        });
-      }
+  selectInteraction.on("select", (e) => {
+    const selected = e.selected[0];
+    if (selected) {
+      // Map Feature back to clean Object for Store
+      const properties = selected.getProperties();
+      // Remove OL geometry to keep store clean
+      const { geometry, ...props } = properties; 
+      
+      selectionStore.selectFeature({
+        properties: props,
+        // If you need the geometry in the store:
+        // geometry: new GeoJSON().writeGeometryObject(selected.getGeometry())
+      });
+    } else {
+      selectionStore.clearSelection();
     }
+  });
 
-    // FIXED: Use _id instead of id
-    if (newFeature?.properties?._featureId) {
-      const newLayer = layerRegistry[newFeature.properties._featureId];
-      if (newLayer && newLayer.setStyle) {
-        newLayer.setStyle({
-          weight: 5,
-          color: "#FFFF00", // Selection Highlight
-        });
-        newLayer.bringToFront();
-      }
-    }
-  }
-);
+  map.addInteraction(selectInteraction);
+};
+
+// --- WATCHERS ---
+
+// Toggle Layers Visibility
+watch(() => layerStore.layers, (layers) => {
+    layers.forEach(l => {
+        if (l.layerInstance) {
+            l.layerInstance.setVisible(l.visible);
+        }
+    });
+}, { deep: true });
 
 onUnmounted(() => {
-  // ADDED: Cleanup workers first
-  if (layerManagerCleanup) {
-    layerManagerCleanup();
-  }
-
-  // disconnect resize observer
-  if (resizeObserver) resizeObserver.disconnect();
-
-  // reset layers
-  layerStore.reset();
-
-  // remove map
-  if (map) map.remove();
+  if (layerManager) layerManager.cleanup();
+  if (map) map.setTarget(null);
 });
 </script>
 
 <style scoped>
 .map-container {
+  width: 100%;
+  height: 100%;
   position: absolute;
   top: 0;
   left: 0;
-  height: 100%;
-  width: 100%;
 }
-
 #map {
-  height: 100%;
   width: 100%;
-  z-index: 1;
-  background: #ddd;
+  height: 100%;
 }
 </style>
