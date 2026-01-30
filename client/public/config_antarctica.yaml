@@ -4,8 +4,8 @@
 
 # 1. Map View Settings
 view:
-  center: [-90, 0]        # Centered directly on the South Pole
-  zoom: 3                 # Zoom levels differ in polar projections
+  center: [0, 0]        # Centered directly on the South Pole
+  zoom: 1                 # Zoom levels differ in polar projections
   minZoom: 0
   maxZoom: 12
   extent: [-4194304, -4194304, 4194304, 4194304]  # Full extent for Antarctica view
@@ -16,7 +16,7 @@ projection_params:
   proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
   extent: [-4194304, -4194304, 4194304, 4194304]
   resolutions: [8192, 4096, 2048, 1024, 512, 256, 128, 64]
-  
+
 # 3. Base Map Layers (Using GBIF Polar Tiles)
 base_layers:
   - name: "OpenStreetMap"

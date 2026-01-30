@@ -163,6 +163,7 @@ export function useLayerManager(map) {
 
     // CRITICAL: Create layer but DON'T add to map yet
     const leafletLayer = L.geoJSON(null, {
+      /*
       coordsToLatLng: (coords) => {
         const crs = map.options.crs;
         if (crs.projection && typeof crs.unproject === "function") {
@@ -170,6 +171,7 @@ export function useLayerManager(map) {
         }
         return L.GeoJSON.coordsToLatLng(coords);
       },
+      */
       style: () => ({
         color: layer.color || "#3388ff",
         weight: 2,

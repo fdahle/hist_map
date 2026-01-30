@@ -74,7 +74,7 @@ onMounted(async () => {
   map = L.map(mapContainer.value, {
     crs: selectedCrs,
     renderer: L.canvas({ tolerance: 5 }),
-    center: config.view.center,
+    center: selectedCrs.unproject(L.point(config.view.center[0], config.view.center[1])), 
     zoom: config.view.zoom,
     maxBounds: selectedCrs.options.bounds || null, // Only bounds the map if defined
     zoomControl: false,
