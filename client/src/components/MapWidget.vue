@@ -5,7 +5,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, inject, ref, watch } from "vue";
+import { onMounted, onUnmounted, inject, ref } from "vue";
 import "ol/ol.css"; // OpenLayers CSS
 
 import Map from "ol/Map";
@@ -39,28 +39,40 @@ onMounted(async () => {
   // 1. Register Projections (e.g. EPSG:3031)
   const projectionCode = registerCustomProjections(config);
 
-  // 2. Determine Center (Transform [Lat, Lon] -> Projection Units)
-  // Config usually provides [Lat, Lon]. OL View needs Projected Coords.
-  const centerLonLat = [config.view.center[1], config.view.center[0]]; // OL expects [Lon, Lat]
-  const centerProjected = fromLonLat(centerLonLat, projectionCode);
+  // 2. Determine Center
+  // Check if center is in geographic coords (lat/lon) or projected coords (meters)
+  // If values are large (> 360), they're likely projected coordinates
+  let centerProjected;
+  const centerValues = config.view.center;
+  
+  if (Math.abs(centerValues[0]) > 360 || Math.abs(centerValues[1]) > 360) {
+    // Already in projected coordinates (meters)
+    centerProjected = centerValues;
+  } else {
+    // Geographic coordinates [lon, lat] or [lat, lon] - need to transform
+    // Assume format is [lat, lon] and swap to [lon, lat] for fromLonLat
+    const centerLonLat = [centerValues[1], centerValues[0]];
+    centerProjected = fromLonLat(centerLonLat, projectionCode);
+  }
 
   // 3. Initialize Map
   map = new Map({
     target: mapContainer.value,
     controls: defaultControls({ zoom: false, attribution: false }),
-    layers: [], // Layers loaded via Manager
+    layers: [], // Layers added via Manager
     view: new View({
       projection: projectionCode,
       center: centerProjected,
       zoom: config.view.zoom,
       minZoom: config.view.minZoom,
-      maxZoom: config.view.maxZoom
+      maxZoom: config.view.maxZoom,
+      constrainResolution: true // Force integer zoom levels
     })
   });
   
   mapStore.setMap(map);
 
-  // 4. Initialize Manager
+  // 4. Initialize Manager and load layers
   layerManager = useLayerManager(map);
   
   const promises = [];
@@ -79,28 +91,24 @@ onMounted(async () => {
 const setupSelection = () => {
   // Highlight Style
   const highlightStyle = new Style({
-    stroke: new Stroke({ color: "#FFFF00", width: 4 }), // Yellow Highlight
+    stroke: new Stroke({ color: "#FFFF00", width: 4 }),
     fill: new Fill({ color: "rgba(255, 255, 0, 0.3)" }),
     zIndex: 999
   });
 
   selectInteraction = new Select({
     condition: click,
-    style: highlightStyle // Apply this style to selected features
+    style: highlightStyle
   });
 
   selectInteraction.on("select", (e) => {
     const selected = e.selected[0];
     if (selected) {
-      // Map Feature back to clean Object for Store
       const properties = selected.getProperties();
-      // Remove OL geometry to keep store clean
       const { geometry, ...props } = properties; 
       
       selectionStore.selectFeature({
         properties: props,
-        // If you need the geometry in the store:
-        // geometry: new GeoJSON().writeGeometryObject(selected.getGeometry())
       });
     } else {
       selectionStore.clearSelection();
@@ -110,16 +118,8 @@ const setupSelection = () => {
   map.addInteraction(selectInteraction);
 };
 
-// --- WATCHERS ---
-
-// Toggle Layers Visibility
-watch(() => layerStore.layers, (layers) => {
-    layers.forEach(l => {
-        if (l.layerInstance) {
-            l.layerInstance.setVisible(l.visible);
-        }
-    });
-}, { deep: true });
+// REMOVED: The deep watcher that was causing performance issues
+// Layers are now added to the map immediately and only visibility is toggled
 
 onUnmounted(() => {
   if (layerManager) layerManager.cleanup();

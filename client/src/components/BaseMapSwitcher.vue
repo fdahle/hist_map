@@ -58,7 +58,7 @@ const layersToDisplay = computed(() => {
 });
 
 function handleLayerClick(layer) {
-  toggleLayer(layers.value.indexOf(layer));
+  toggleLayer(layer._layerId);
   isHovered.value = false;
 }
 
@@ -71,8 +71,15 @@ function getTileUrl(layer) {
   const x = Math.floor(n * ((lon + 180) / 360));
   const latRad = lat * Math.PI / 180;
   const y = Math.floor(n * (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2);
-  let urlTemplate = layer.layerInstance._url; 
+  
+  // Access OpenLayers XYZ source URL
+  const source = layer.layerInstance.getSource();
+  if (!source) return '';
+  
+  const urls = source.getUrls();
+  let urlTemplate = urls && urls.length > 0 ? urls[0] : null;
   if (!urlTemplate) return ''; 
+  
   return urlTemplate.replace('{s}', 'a').replace('{z}', z).replace('{x}', x).replace('{y}', y);
 }
 </script>

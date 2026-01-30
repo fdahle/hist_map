@@ -10,8 +10,8 @@ import VectorLayer from "ol/layer/Vector";
 import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
 import GeoJSON from "ol/format/GeoJSON";
-import { Style, Stroke, Fill, Circle as CircleStyle } from "ol/style";
-import { transformExtent } from "ol/proj";
+import { Style, Stroke, Fill } from "ol/style";
+import TileGrid from "ol/tilegrid/TileGrid";
 
 export function useLayerManager(map) {
   const layerStore = useLayerStore();
@@ -35,32 +35,64 @@ export function useLayerManager(map) {
   const processLayer = async (layerConf, category) => {
     const layerId = layerConf._layerId || generateUUID();
 
+    // Set z-index based on category
+    const zIndex = category === "base" ? 0 : 100;
+
     // --- TILE LAYERS ---
     if (layerConf.type === "tile") {
-      // Handle Custom Grids (NASA / GBIF) if 'crs_options' exists
-      // For simplicity, we stick to standard XYZ, which works for 90% of cases
-      // If you need the specific matrix sets, we can add WMTSTileGrid later.
+      const projection = map.getView().getProjection();
       
-      const source = new XYZ({
-        url: layerConf.url,
+      // Create source configuration
+      const sourceConfig = {
         attributions: layerConf.attribution,
-        projection: map.getView().getProjection(), // Align with map projection
+        projection: projection,
         wrapX: layerConf.noWrap !== true,
-      });
+      };
+
+      // Add tile grid if custom resolutions are provided (for polar projections)
+      if (layerConf.crs_options?.resolutions && layerConf.crs_options?.extent) {
+        const extent = layerConf.crs_options.extent;
+        const resolutions = layerConf.crs_options.resolutions;
+        
+        sourceConfig.tileGrid = new TileGrid({
+          extent: extent,
+          resolutions: resolutions,
+          tileSize: layerConf.tileSize || 256
+        });
+      }
+
+      // CRITICAL FIX: Use tileUrlFunction to ensure integer zoom levels
+      // GBIF uses standard XYZ tile scheme, so we just need integers
+      sourceConfig.tileUrlFunction = (tileCoord) => {
+        if (!tileCoord) return '';
+        
+        const z = tileCoord[0];
+        let x = tileCoord[1];
+        let y = tileCoord[2];
+        
+        // Replace placeholders in URL template
+        return layerConf.url
+          .replace('{z}', z.toString())
+          .replace('{x}', x.toString())
+          .replace('{y}', y.toString());
+      };
+      
+      const source = new XYZ(sourceConfig);
 
       const olLayer = new TileLayer({
         source: source,
         visible: layerConf.visible,
+        zIndex: zIndex, // Set z-index
         properties: { name: layerConf.name, id: layerId }
       });
 
+      // Add to store
       layerStore.addLayer(
         layerId, layerConf.name, olLayer, "tile", category, layerConf.visible, "tile", null, layerConf.url
       );
 
-      if (layerConf.visible) {
-        map.addLayer(olLayer);
-      }
+      // ALWAYS add to map immediately (visibility controlled via setVisible)
+      map.addLayer(olLayer);
     }
 
     // --- GEOJSON LAYERS ---
@@ -100,10 +132,10 @@ export function useLayerManager(map) {
   };
 
   const finalizeGeoJsonLayer = (geoJsonData, layer, worker) => {
-    // 1. Parse GeoJSON (OpenLayers handles projection automatically if featureProjection is set)
+    // 1. Parse GeoJSON
     const format = new GeoJSON();
     const features = format.readFeatures(geoJsonData, {
-      featureProjection: map.getView().getProjection() // Transform to Map Projection
+      featureProjection: map.getView().getProjection()
     });
 
     // 2. Assign IDs and Styles
@@ -112,20 +144,18 @@ export function useLayerManager(map) {
     // Default Vector Style
     const vectorStyle = new Style({
         stroke: new Stroke({ color: baseColor, width: 2 }),
-        fill: new Fill({ color: baseColor + "80" }) // Add transparency hex
+        fill: new Fill({ color: baseColor + "80" })
     });
     
     // Pin Style for Points
     const pinStyle = createPinStyle(baseColor);
 
     features.forEach(feature => {
-      // Ensure ID
       const fid = feature.get("id") || generateUUID();
       feature.setId(fid);
       feature.set("_layerId", layer._layerId);
       feature.set("_featureId", fid);
       
-      // Store in registry for quick lookup
       layerRegistry[fid] = feature;
     });
 
@@ -136,9 +166,9 @@ export function useLayerManager(map) {
 
     const olLayer = new VectorLayer({
       source: source,
-      visible: layer.active, // Only show if active
+      visible: layer.active,
+      zIndex: 100, // Overlays on top
       style: (feature) => {
-          // Dynamic Style Function
           if (feature.getGeometry().getType() === "Point") return pinStyle;
           return vectorStyle;
       },
@@ -151,9 +181,8 @@ export function useLayerManager(map) {
         storeLayer.layerInstance = olLayer;
         storeLayer.status = "ready";
         
-        if (storeLayer.active) {
-            map.addLayer(olLayer);
-        }
+        // ALWAYS add to map immediately
+        map.addLayer(olLayer);
     }
 
     worker.terminate();

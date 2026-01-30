@@ -1,23 +1,22 @@
 # ==========================================
-# ANTARCTICA TEST CONFIGURATION
+# ANTARCTICA CORRECTED CONFIGURATION
 # ==========================================
 
 # 1. Map View Settings
 view:
-  center: [-2000000, 1000000]        # Centered directly on the South Pole
-  zoom: 1                 # Zoom levels differ in polar projections
-  minZoom: 2
-  maxZoom: 12
-  extent: [-4194304, -4194304, 4194304, 4194304]  # Full extent for Antarctica view
+  center: [0, -90]  # [Longitude, Latitude] format - South Pole
+  zoom: 2
+  minZoom: 0
+  maxZoom: 9
   
 # 2. Coordinate Reference System
 crs: "EPSG:3031"
 projection_params:
   proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
   extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
-  resolutions: [8192, 4096, 2048, 1024, 512, 256, 128, 64]
 
 # 3. Base Map Layers (Using GBIF Polar Tiles)
+# GBIF tile resolutions for EPSG:3031: https://tile.gbif.org/ui/
 base_layers:
   - name: "OSM"
     type: "tile"
@@ -27,9 +26,8 @@ base_layers:
     attribution: "© OpenStreetMap contributors"    
     crs_options:
       extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
-      resolutions: [8192, 4096, 2048, 1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1]
-      proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-
+      resolutions: [67733.46880027094, 33866.73440013547, 16933.367200067736, 8466.683600033868, 4233.341800016934, 2116.670900008467, 1058.3354500042335, 529.1677250021167, 264.5838625010584, 132.2919312505292]
+      
   - name: "MODIS"
     type: "tile"
     url: "https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/2013-12-01/250m/{z}/{y}/{x}.jpg"
@@ -39,7 +37,6 @@ base_layers:
     crs_options:
       extent: [-4194304, -4194304, 4194304, 4194304]
       resolutions: [16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64]
-      proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
   
   - name: "Geyser"
     type: "tile"
@@ -47,6 +44,9 @@ base_layers:
     visible: false
     tileSize: 512
     attribution: "© GBIF, OpenStreetMap contributors"
+    crs_options:
+      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
+      resolutions: [67733.46880027094, 33866.73440013547, 16933.367200067736, 8466.683600033868, 4233.341800016934, 2116.670900008467, 1058.3354500042335, 529.1677250021167, 264.5838625010584, 132.2919312505292]
 
   - name: "Classic"
     type: "tile"
@@ -54,21 +54,24 @@ base_layers:
     visible: false
     tileSize: 512
     attribution: "© GBIF, OpenStreetMap contributors"
+    crs_options:
+      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
+      resolutions: [67733.46880027094, 33866.73440013547, 16933.367200067736, 8466.683600033868, 4233.341800016934, 2116.670900008467, 1058.3354500042335, 529.1677250021167, 264.5838625010584, 132.2919312505292]
 
 # 4. Overlay Layers
-# Note: Ensure your local GeoJSON files contain data for Antarctica!
 overlay_layers:
   - name: "Georef Sat"
     type: "geojson"
     url: "http://localhost:3000/data/georef_sat.geojson"
     visible: true
+    color: "#ff6600"
   - name: "Research Stations"
     type: "geojson"
     url: "http://localhost:3000/data/stations.geojson"
     visible: true
-    pointType: "marker"
+    color: "#0066ff"
   - name: "Glaciers"
     type: "geojson"
     url: "http://localhost:3000/data/glaciers.geojson"
     visible: false
- 
+    color: "#00ccff"

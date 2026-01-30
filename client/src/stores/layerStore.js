@@ -1,10 +1,7 @@
 // client/src/stores/layerStore.js
 import { defineStore } from "pinia";
-import { markRaw, ref, computed, nextTick } from "vue";
-import { useMapStore } from "./mapStore";
-// 1. Updated Import (OpenLayers Style Helper)
+import { markRaw, ref, computed } from "vue";
 import { createPinStyle } from "../composables/utils"; 
-// 2. OpenLayers Style Imports
 import { Style, Stroke, Fill } from "ol/style"; 
 
 // Simple debounce implementation
@@ -42,13 +39,24 @@ export const useLayerStore = defineStore("layers", () => {
       initialStatus = "idle";
     }
 
+    // Set z-index based on category
+    let zIndex = 0;
+    if (category === "base") {
+      zIndex = 0; // Base layers at bottom
+    } else if (category === "overlay") {
+      zIndex = 100; // Overlay layers on top
+    }
+
+    if (layerInstance) {
+      layerInstance.setZIndex(zIndex);
+    }
+
     layers.value.push({
       _layerId: layerId,
       name,
       type,
       category,
       active: isVisible,
-      // OpenLayers layers are objects too, markRaw is still good practice
       layerInstance: layerInstance ? markRaw(layerInstance) : null,
       geometryType: geometryType || "unknown",
       color: color || "#3388ff",
@@ -56,6 +64,7 @@ export const useLayerStore = defineStore("layers", () => {
       progress: 0,
       status: initialStatus,
       error: null,
+      zIndex: zIndex,
     });
   };
 
@@ -120,7 +129,7 @@ export const useLayerStore = defineStore("layers", () => {
     }
   };
 
-  // 3. UPDATED: Toggle Logic using setVisible() instead of add/remove
+  // UPDATED: Toggle Logic - ONLY changes visibility, doesn't add/remove from map
   const toggleLayer = async (layerId) => {
     const layer = layers.value.find((l) => l._layerId === layerId);
 
@@ -141,13 +150,13 @@ export const useLayerStore = defineStore("layers", () => {
       layers.value.forEach((l) => {
         if (l.category === "base" && l.active) {
           l.active = false;
-          if (l.layerInstance) l.layerInstance.setVisible(false); // OL Method
+          if (l.layerInstance) l.layerInstance.setVisible(false);
         }
       });
       
       // Enable this one
       layer.active = true;
-      if (layer.layerInstance) layer.layerInstance.setVisible(true); // OL Method
+      if (layer.layerInstance) layer.layerInstance.setVisible(true);
     } 
     // OVERLAY LAYER LOGIC
     else {
@@ -160,7 +169,7 @@ export const useLayerStore = defineStore("layers", () => {
     }
   };
 
-  // 4. UPDATED: Color Update Logic for OpenLayers
+  // UPDATED: Color Update Logic for OpenLayers
   const updateLayerColor = (layerId, newColor) => {
     const layerObj = layers.value.find((l) => l._layerId === layerId);
     if (!layerObj || !layerObj.layerInstance) return;
@@ -171,12 +180,12 @@ export const useLayerStore = defineStore("layers", () => {
     // Define new styles with the new color
     const newVectorStyle = new Style({
         stroke: new Stroke({ color: newColor, width: 2 }),
-        fill: new Fill({ color: newColor + "80" }) // Add transparency
+        fill: new Fill({ color: newColor + "80" })
     });
     
     const newPinStyle = createPinStyle(newColor);
 
-    // Apply via Style Function (Standard OL way to handle dynamic styles)
+    // Apply via Style Function
     if (olLayer.setStyle) {
         olLayer.setStyle((feature) => {
             const type = feature.getGeometry().getType();
