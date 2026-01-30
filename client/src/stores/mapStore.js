@@ -44,25 +44,30 @@ export const useMapStore = defineStore("map", () => {
       }
     });
 
-    // 3. Listen for Mouse Movement ('pointermove' in OpenLayers)
+    // 3. Throttled Mouse Movement tracking (reduce CPU during zoom/pan)
+    let lastPointerUpdate = 0;
+    const POINTER_THROTTLE_MS = 50; // Update at most every 50ms
+    
     map.on("pointermove", (e) => {
       if (e.dragging) return;
       
-      // e.coordinate is ALREADY in the map's projection (Meters for EPSG:3031)
+      const now = Date.now();
+      if (now - lastPointerUpdate < POINTER_THROTTLE_MS) return;
+      lastPointerUpdate = now;
+      
       const coords = e.coordinate;
       
       // Update Projected (Raw X/Y)
       projectedCoords.value = { x: coords[0], y: coords[1] };
 
       // Update Geographic (Lat/Lon)
-      // We must transform from Map Projection -> Lat/Lon (EPSG:4326)
       const [lon, lat] = toLonLat(coords, map.getView().getProjection());
-      
       mouseCoords.value = { lat, lng: lon };
     });
   };
 
   return {
+    map: mapInstance,
     zoom,
     center,
     crsName,

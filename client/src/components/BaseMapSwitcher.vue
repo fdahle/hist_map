@@ -1,87 +1,174 @@
 <template>
-  <div 
-    v-if="shouldShowSwitcher" 
+  <div
+    v-if="shouldShowSwitcher"
     class="base-switcher"
     :class="{ 'is-expanded': isHovered, 'stack-mode': isStackMode }"
     @mouseenter="isHovered = true"
     @mouseleave="isHovered = false"
   >
-    <div 
-      v-for="layer in layersToDisplay" 
-      :key="layer._layerId" 
+    <div
+      v-for="layer in layersToDisplay"
+      :key="layer._layerId"
       class="base-thumb"
       :class="{ active: layer.active }"
       @click="handleLayerClick(layer)"
     >
-      <div 
-        class="preview-box" 
-        :style="{ backgroundImage: `url(${getTileUrl(layer)})` }"
-      >
+      <div class="preview-box" :style="getPreviewStyle(layer)">
         <div class="overlay-gradient"></div>
       </div>
-      
+
       <span class="label">{{ layer.name }}</span>
-      
+
       <div v-if="layer.active" class="active-indicator"></div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
-import { storeToRefs } from 'pinia';
+import { ref, computed, watch, onUnmounted } from "vue";
+import { storeToRefs } from "pinia";
 import { useLayerStore } from "../stores/layerStore";
 import { useMapStore } from "../stores/mapStore";
 
+// --- STATE & STORES ---
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
 
-const { layers, baseLayers } = storeToRefs(layerStore);
+const { baseLayers } = storeToRefs(layerStore);
+const { map } = storeToRefs(mapStore);
 const { toggleLayer } = layerStore;
-const { center, zoom } = storeToRefs(mapStore); 
 
 const isHovered = ref(false);
+const previewUrls = ref({}); // Stores the calculated live URLs
 
+// --- COMPUTED PROPS ---
 const shouldShowSwitcher = computed(() => baseLayers.value.length > 1);
 const isStackMode = computed(() => baseLayers.value.length > 2);
 
 const layersToDisplay = computed(() => {
-  // Case 1: Simple Toggle (2 layers) -> Show the one we are NOT viewing
-  // This acts as a "Switch to Satellite" button
-  if (baseLayers.value.length === 2) {
-    return baseLayers.value.filter(l => !l.active);
+  // 1. Always sort by config order for stability
+  const sorted = [...baseLayers.value].sort(
+    (a, b) => (a.order || 0) - (b.order || 0)
+  );
+
+  // 2. If COLLAPSED: Show exactly one alternative
+  if (!isHovered.value) {
+    // Find the first inactive layer to act as the "Switch to..." button
+    const inactive = sorted.find((l) => !l.active);
+    return inactive ? [inactive] : [sorted[0]];
   }
-  
-  // Case 2: Multi-select Stack (>2 layers) -> Return ALL. 
-  // CSS handles hiding the inactive ones until hover.
-  return baseLayers.value;
+
+  // 3. If EXPANDED: Show all layers in order
+  return sorted;
 });
+
+// --- HELPER: Simple Debounce (to avoid too many calculations while dragging) ---
+function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
+}
+
+// --- CORE LOGIC: Update Previews ---
+const updatePreviews = () => {
+  if (!map.value) return;
+
+  baseLayers.value.forEach((layer) => {
+    // Only calculate dynamic URL if we don't have a static image
+    // and the layer is ready
+    if (
+      !layer.preview_image &&
+      layer.status === "ready" &&
+      layer.layerInstance
+    ) {
+      previewUrls.value[layer._layerId] = getDynamicTileUrl(layer);
+    }
+  });
+};
+
+const debouncedUpdate = debounce(updatePreviews, 500);
+
+// --- WATCHER: Setup Live Map Listeners ---
+watch(
+  map,
+  (newMap) => {
+    if (newMap) {
+      const view = newMap.getView();
+
+      // 1. Initial Calculation
+      updatePreviews();
+
+      // 2. Bind to View changes for "Live" effect
+      view.on("change:center", debouncedUpdate);
+      view.on("change:resolution", debouncedUpdate);
+    }
+  },
+  { immediate: true }
+);
+
+// --- GENERIC OPENLAYERS TILE URL FUNCTION ---
+function getDynamicTileUrl(layer) {
+  if (!layer.layerInstance || !map.value) return "";
+
+  const source = layer.layerInstance.getSource();
+  const view = map.value.getView();
+
+  if (!source || !view) return "";
+
+  // Check if source handles tiles
+  if (typeof source.getTileGrid !== "function") return "";
+
+  const tileGrid = source.getTileGrid();
+  const tileUrlFunc = source.getTileUrlFunction();
+
+  if (!tileGrid || !tileUrlFunc) return "";
+
+  // Get tile coordinate for the Map Center
+  const tileCoord = tileGrid.getTileCoordForCoordAndResolution(
+    view.getCenter(),
+    view.getResolution()
+  );
+
+  // Generate URL (pixelRatio = 1)
+  return tileUrlFunc(tileCoord, 1, view.getProjection()) || "";
+}
+
+// --- STYLE HANDLER ---
+function getPreviewStyle(layer) {
+  // Priority 1: Static Image from Config (Best for Antarctica)
+  if (layer.preview_image) {
+    return { backgroundImage: `url(${layer.preview_image})` };
+  }
+
+  // Priority 2: Calculated Live URL
+  const liveUrl = previewUrls.value[layer._layerId];
+  if (liveUrl) {
+    return { backgroundImage: `url(${liveUrl})` };
+  }
+
+  // Fallback: Grey background
+  return { backgroundColor: "#e0e0e0" };
+}
 
 function handleLayerClick(layer) {
   toggleLayer(layer._layerId);
   isHovered.value = false;
 }
 
-function getTileUrl(layer) {
-  if (!center.value || !zoom.value || !layer.layerInstance) return "";
-  const lat = center.value.lat;
-  const lon = center.value.lng;
-  const z = Math.max(0, zoom.value - 1); 
-  const n = Math.pow(2, z);
-  const x = Math.floor(n * ((lon + 180) / 360));
-  const latRad = lat * Math.PI / 180;
-  const y = Math.floor(n * (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2);
-  
-  // Access OpenLayers XYZ source URL
-  const source = layer.layerInstance.getSource();
-  if (!source) return '';
-  
-  const urls = source.getUrls();
-  let urlTemplate = urls && urls.length > 0 ? urls[0] : null;
-  if (!urlTemplate) return ''; 
-  
-  return urlTemplate.replace('{s}', 'a').replace('{z}', z).replace('{x}', x).replace('{y}', y);
-}
+// --- CLEANUP ---
+onUnmounted(() => {
+  if (map.value) {
+    const view = map.value.getView();
+    view.un("change:center", debouncedUpdate);
+    view.un("change:resolution", debouncedUpdate);
+  }
+});
 </script>
 
 <style scoped>
@@ -92,11 +179,11 @@ function getTileUrl(layer) {
   background: white;
   padding: 6px;
   border-radius: 12px;
-  /* Deep shadow for "floating" effect */
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.1);
   pointer-events: auto;
   transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-  border: 1px solid rgba(0,0,0,0.05);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  min-width: 64px;
 }
 
 /* --- Thumbnails --- */
@@ -108,44 +195,41 @@ function getTileUrl(layer) {
   border-radius: 8px;
   overflow: hidden;
   flex-shrink: 0;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  /* Smoother transition for expanding/collapsing */
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.3s ease;
 }
 
+/* Hover effect for individual thumbs */
 .base-thumb:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   z-index: 10;
 }
 
-/* Active State Styling */
+/* Highlight the layer that is currently on the map */
 .base-thumb.active {
-  /* Creates a border outside the image */
-  box-shadow: 0 0 0 2px #3b82f6; /* Modern Blue Ring */
+  box-shadow: 0 0 0 2px #3b82f6;
 }
 
 /* --- Preview Image Box --- */
 .preview-box {
   width: 100%;
   height: 100%;
-  background-color: #eee; 
-  background-size: cover; 
+  background-color: #eee;
+  background-size: cover;
   background-position: center;
   position: relative;
 }
 
-/* Gradient to make text readable */
+/* Gradient and Labels */
 .overlay-gradient {
   position: absolute;
   bottom: 0;
   left: 0;
   width: 100%;
   height: 50%;
-  background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 100%);
-  border-bottom-left-radius: 8px;
-  border-bottom-right-radius: 8px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.7) 0%, transparent 100%);
 }
 
-/* --- Label Typography --- */
 .label {
   position: absolute;
   bottom: 4px;
@@ -154,52 +238,10 @@ function getTileUrl(layer) {
   color: white;
   font-size: 10px;
   font-weight: 600;
-  text-transform: capitalize;
-  line-height: 1.1;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  pointer-events: none; /* Let clicks pass through to container */
-}
-
-/* --- STACK MODE (3+ Layers) --- */
-
-/* 1. Default State: Collapsed (Column reverse ensures Active is on top visually if we stacked vertically, 
-   but for horizontal strip, we just hide inactive) */
-.stack-mode {
-  /* If you prefer vertical stack, change to column-reverse */
-  flex-direction: row-reverse; 
-}
-
-/* Hide inactive layers by default in stack mode */
-.stack-mode .base-thumb {
-  width: 0;
-  padding: 0;
-  margin: 0;
-  opacity: 0;
-  pointer-events: none;
-  transition: all 0.3s ease; /* Smooth slide out */
-}
-
-/* Always show the active layer */
-.stack-mode .base-thumb.active {
-  width: 64px;
-  opacity: 1;
-  pointer-events: auto;
-  order: 1; /* Keep it visible */
-}
-
-/* 2. Hover State: Expanded */
-.base-switcher.stack-mode.is-expanded {
-  flex-direction: row; /* Expand normally left-to-right */
-  padding-right: 8px;
-}
-
-.base-switcher.stack-mode.is-expanded .base-thumb {
-  width: 64px;
-  opacity: 1;
-  pointer-events: auto;
-  margin-right: 0;
 }
 </style>
