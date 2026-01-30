@@ -10,7 +10,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 // --- IMPORTS ---
-import { CRS_MAP } from "../constants/crs";
+import { getProjectedCRS } from "../constants/crs";
 import { useMapStore } from "../stores/mapStore";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useLayerStore } from "../stores/layerStore";
@@ -68,19 +68,17 @@ const handleColorChange = ({ color, layer }) => {
 onMounted(async () => {
   if (!mapContainer.value) return;
 
-  // Look up the CRS from our constants using the string from config
-  const selectedCrs = CRS_MAP[config.crs] || L.CRS.EPSG3857;
+  // The code is now projection-agnostic
+  const selectedCrs = getProjectedCRS(config);
 
   map = L.map(mapContainer.value, {
-    crs: selectedCrs, // Apply the constant here
-    renderer: L.canvas({tolerance: 5}),
-    center: config.view.center || [0, 0],
-    zoom: config.view.zoom || 2,
-    minZoom: config.view.minZoom || 1,
-    maxZoom: config.view.maxZoom || 18,
+    crs: selectedCrs,
+    renderer: L.canvas({ tolerance: 5 }),
+    center: config.view.center,
+    zoom: config.view.zoom,
+    maxBounds: selectedCrs.options.bounds || null, // Only bounds the map if defined
     zoomControl: false,
   });
-
   mapStore.setMap(map);
 
   const manager = useLayerManager(map);

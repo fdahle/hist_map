@@ -5,23 +5,42 @@
 # 1. Map View Settings
 view:
   center: [-90, 0]        # Centered directly on the South Pole
-  zoom: 1                 # Zoom levels differ in polar projections
+  zoom: 3                 # Zoom levels differ in polar projections
   minZoom: 0
-  maxZoom: 16
+  maxZoom: 12
+  extent: [-4194304, -4194304, 4194304, 4194304]  # Full extent for Antarctica view
   
 # 2. Coordinate Reference System
 crs: "EPSG:3031"
-
+projection_params:
+  proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+  extent: [-4194304, -4194304, 4194304, 4194304]
+  resolutions: [8192, 4096, 2048, 1024, 512, 256, 128, 64]
+  
 # 3. Base Map Layers (Using GBIF Polar Tiles)
 base_layers:
-  - name: "Antarctic (GBIF Geyser)"
+  - name: "OpenStreetMap"
+    type: "tile"
+    url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=osm-bright-en"
+    visible: true
+    tileSize: 512
+    attribution: "© OpenStreetMap contributors"    
+
+  - name: "NASA MODIS (Antarctica)"
+    type: "tile"
+    url: "https://gibs.earthdata.nasa.gov/wmts/epsg3031/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/2013-12-01/250m/{z}/{y}/{x}.jpg"
+    visible: false
+    tileSize: 512
+    attribution: "NASA Global Imagery Browse Services (GIBS)"
+
+  - name: "Geyser"
     type: "tile"
     url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-geyser"
-    visible: true
+    visible: false
     tileSize: 512
     attribution: "© GBIF, OpenStreetMap contributors"
 
-  - name: "Antarctic (GBIF Classic)"
+  - name: "Classic"
     type: "tile"
     url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-classic"
     visible: false

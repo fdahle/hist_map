@@ -5,7 +5,11 @@
         ☰
       </button>
 
-      <SideBar class="main-sidebar" :class="{ open: isSidebarOpen }" />
+      <SideBar 
+        class="main-sidebar" 
+        :class="{ open: isSidebarOpen }" 
+        @open-settings="isSettingsOpen = true"
+      />
 
       <div
         v-if="isSidebarOpen"
@@ -16,14 +20,19 @@
       <div class="map-area">
         <MapWidget />
 
-        <div class="bottom-left-control">
+        <div class="bottom-left-control" :class="{ 'has-info-bar': settingsStore.showInfoBar }">
           <BaseMapSwitcher />
         </div>
 
-        <InformationBar />
+        <InformationBar v-if="settingsStore.showInfoBar" />
 
         <AttributePanel />
       </div>
+
+      <Settings
+        :is-open="isSettingsOpen"
+        @close="isSettingsOpen = false"
+      />
     </div>
 
     <div v-else class="loading">Loading Configuration...</div>
@@ -36,8 +45,12 @@ import yaml from "js-yaml";
 import MapWidget from "./components/MapWidget.vue";
 import SideBar from "./components/SideBar.vue";
 import BaseMapSwitcher from "./components/BaseMapSwitcher.vue";
-import AttributePanel from "./components/AttributePanel.vue"; // <--- 1. Import it
-import InformationBar from "./components/InformationBar.vue"; // <--- 2. Import it
+import AttributePanel from "./components/AttributePanel.vue";
+import InformationBar from "./components/InformationBar.vue";
+
+// --- FIX: Import the Missing Components & Store ---
+import Settings from "./components/modals/Settings.vue";
+import { useSettingsStore } from "./stores/settingsStore";
 
 // state variables
 const isConfigLoaded = ref(false);
@@ -46,6 +59,10 @@ const isSidebarOpen = ref(false);
 
 // provide config to the rest of the app
 provide("config", appConfig);
+
+// --- FIX: Initialize Store & Modal State ---
+const settingsStore = useSettingsStore(); 
+const isSettingsOpen = ref(false);
 
 // load configuration on mount
 onMounted(async () => {
@@ -102,16 +119,22 @@ body {
   display: none;
 }
 
+/* --- CONTROL POSITIONING --- */
 .bottom-left-control {
   position: absolute;
   bottom: 25px;
   left: 20px;
   z-index: 1000;
+  transition: bottom 0.3s ease; /* Smooth animation */
+}
+
+/* 4. ADDED: Moves switcher up when InfoBar is visible */
+.bottom-left-control.has-info-bar {
+  bottom: 40px; /* 28px bar + 12px gap */
 }
 
 /* --- MOBILE STYLES (Max Width 768px) --- */
 @media (max-width: 768px) {
-  /* 1. Show the Hamburger Button */
   .menu-toggle {
     display: block;
     position: absolute;
@@ -127,7 +150,6 @@ body {
     cursor: pointer;
   }
 
-  /* 2. Hide Left Sidebar by default */
   .main-sidebar {
     position: absolute;
     top: 0;
@@ -141,7 +163,6 @@ body {
     left: 0;
   }
 
-  /* 3. Dark Overlay */
   .sidebar-overlay {
     display: block;
     position: absolute;
@@ -161,14 +182,26 @@ body {
     transform-origin: bottom left;
   }
 
-  /* 4. OPTIONAL: Fix Attribute Panel on Mobile */
-  /* Since we can't edit AttributePanel.vue here, we can override it globally */
+  /* Adjust mobile spacing for InfoBar */
+  .bottom-left-control.has-info-bar {
+    bottom: 45px;
+  }
+
   .attribute-panel {
-    width: 100% !important; /* Full width on phone */
-    height: 50% !important; /* Half height (bottom sheet style) */
+    width: 100% !important;
+    height: 50% !important;
     top: auto !important;
     bottom: 0 !important;
     border-top: 2px solid #ddd;
   }
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  font-family: sans-serif;
+  color: #666;
 }
 </style>

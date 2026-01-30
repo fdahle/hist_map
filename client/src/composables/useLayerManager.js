@@ -35,6 +35,7 @@ export function useLayerManager(map) {
     if (layerConf.type === "tile") {
       const leafletLayer = L.tileLayer(layerConf.url, {
         attribution: layerConf.attribution,
+        // Use config value or default to standard Leaflet 256
         tileSize: layerConf.tileSize || 256,
       });
 

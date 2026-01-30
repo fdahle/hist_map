@@ -156,6 +156,13 @@
       </div>
     </div>
 
+    <div class="sidebar-footer">
+      <button class="settings-btn" @click="$emit('open-settings')">
+        <span class="icon">⚙️</span>
+        <span class="text">Settings</span>
+      </button>
+    </div>
+
     <ContextMenu
       ref="contextMenuRef"
       @action="handleMenuAction"
@@ -170,6 +177,8 @@ import { storeToRefs } from "pinia";
 import { useLayerStore } from "../stores/layerStore";
 import { useMapStore } from "../stores/mapStore";
 import ContextMenu from "./ContextMenu.vue";
+
+defineEmits(['open-settings']);
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
@@ -442,4 +451,36 @@ input[type="checkbox"] {
 input[type="checkbox"]:disabled {
   cursor: not-allowed;
 }
+
+/* Footer Styling */
+.sidebar-footer {
+  padding: 10px;
+  border-top: 1px solid #eee;
+  background: #f9f9f9;
+}
+
+.settings-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #555;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.settings-btn:hover {
+  background: #e0e0e0;
+  color: #000;
+}
+
+.icon {
+  font-size: 1.2rem;
+}
+
 </style>
