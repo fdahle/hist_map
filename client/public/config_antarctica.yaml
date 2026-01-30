@@ -6,6 +6,7 @@
 view:
   center: [0, -90]  # [Longitude, Latitude] format - South Pole
   zoom: 2
+  extent: [-4194304, -4194304, 4194304, 4194304]  # extent for the view
   minZoom: 0
   maxZoom: 9
   
@@ -25,7 +26,7 @@ base_layers:
     tileSize: 512
     attribution: "© OpenStreetMap contributors"    
     crs_options:
-      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
+      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]  # projection extent
       resolutions: [67733.46880027094, 33866.73440013547, 16933.367200067736, 8466.683600033868, 4233.341800016934, 2116.670900008467, 1058.3354500042335, 529.1677250021167, 264.5838625010584, 132.2919312505292]
       
   - name: "MODIS"

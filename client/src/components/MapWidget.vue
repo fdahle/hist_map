@@ -40,20 +40,19 @@ onMounted(async () => {
   const projectionCode = registerCustomProjections(config);
 
   // 2. Determine Center
-  // Check if center is in geographic coords (lat/lon) or projected coords (meters)
-  // If values are large (> 360), they're likely projected coordinates
   let centerProjected;
   const centerValues = config.view.center;
-  
+
   if (Math.abs(centerValues[0]) > 360 || Math.abs(centerValues[1]) > 360) {
     // Already in projected coordinates (meters)
     centerProjected = centerValues;
   } else {
-    // Geographic coordinates [lon, lat] or [lat, lon] - need to transform
-    // Assume format is [lat, lon] and swap to [lon, lat] for fromLonLat
-    const centerLonLat = [centerValues[1], centerValues[0]];
-    centerProjected = fromLonLat(centerLonLat, projectionCode);
+    // Geographic coordinates [lon, lat] - transform them
+    centerProjected = fromLonLat(centerValues, projectionCode);
   }
+
+  // 3. Get view extent if specified
+  const viewExtent = config.view.extent || config.projection_params?.extent;
 
   // 3. Initialize Map
   map = new Map({
@@ -66,21 +65,40 @@ onMounted(async () => {
       zoom: config.view.zoom,
       minZoom: config.view.minZoom,
       maxZoom: config.view.maxZoom,
-      constrainResolution: true // Force integer zoom levels
-    })
+      extent: viewExtent,  // Constrain panning to this extent
+      constrainResolution: true, // Force integer zoom levels
+      showFullExtent: true  // Prevent panning outside extent
+    }),
   });
-  
+
+  if (window.__APP_DEBUG__) {
+    const view = map.getView();
+    const proj = view.getProjection();
+    console.debug("=== MAP DEBUG ===");
+    console.debug("Projection Code:", proj.getCode());
+    console.debug("Projection Extent:", proj.getExtent());
+    console.debug("View Extent:", viewExtent);
+    console.debug("Current Center:", view.getCenter());
+    console.debug("Current Zoom:", view.getZoom());
+  }
+
   mapStore.setMap(map);
 
   // 4. Initialize Manager and load layers
   layerManager = useLayerManager(map);
-  
+
   const promises = [];
   if (config.base_layers) {
-    promises.push(...config.base_layers.map(l => layerManager.processLayer(l, "base")));
+    promises.push(
+      ...config.base_layers.map((l) => layerManager.processLayer(l, "base"))
+    );
   }
   if (config.overlay_layers) {
-    promises.push(...config.overlay_layers.map(l => layerManager.processLayer(l, "overlay")));
+    promises.push(
+      ...config.overlay_layers.map((l) =>
+        layerManager.processLayer(l, "overlay")
+      )
+    );
   }
   await Promise.all(promises);
 
@@ -93,20 +111,20 @@ const setupSelection = () => {
   const highlightStyle = new Style({
     stroke: new Stroke({ color: "#FFFF00", width: 4 }),
     fill: new Fill({ color: "rgba(255, 255, 0, 0.3)" }),
-    zIndex: 999
+    zIndex: 999,
   });
 
   selectInteraction = new Select({
     condition: click,
-    style: highlightStyle
+    style: highlightStyle,
   });
 
   selectInteraction.on("select", (e) => {
     const selected = e.selected[0];
     if (selected) {
       const properties = selected.getProperties();
-      const { geometry, ...props } = properties; 
-      
+      const { geometry, ...props } = properties;
+
       selectionStore.selectFeature({
         properties: props,
       });

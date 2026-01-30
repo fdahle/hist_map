@@ -11,6 +11,7 @@ import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
 import GeoJSON from "ol/format/GeoJSON";
 import { Style, Stroke, Fill } from "ol/style";
+import { createXYZ } from "ol/tilegrid";
 import TileGrid from "ol/tilegrid/TileGrid";
 
 export function useLayerManager(map) {
@@ -42,47 +43,65 @@ export function useLayerManager(map) {
     if (layerConf.type === "tile") {
       const projection = map.getView().getProjection();
       
+      // Detect if this is WMTS (like NASA GIBS) or XYZ (like GBIF)
+      const isWMTS = layerConf.url.includes('{z}/{y}/{x}');
+      
       // Create source configuration
       const sourceConfig = {
         attributions: layerConf.attribution,
         projection: projection,
-        wrapX: layerConf.noWrap !== true,
+        wrapX: false  // TODO: Make configurable?
       };
 
       // Add tile grid if custom resolutions are provided (for polar projections)
       if (layerConf.crs_options?.resolutions && layerConf.crs_options?.extent) {
         const extent = layerConf.crs_options.extent;
         const resolutions = layerConf.crs_options.resolutions;
+        const tileSize = layerConf.tileSize || 256;
         
-        sourceConfig.tileGrid = new TileGrid({
-          extent: extent,
-          resolutions: resolutions,
-          tileSize: layerConf.tileSize || 256
-        });
+        if (isWMTS) {
+          // WMTS uses TMS-style tiles with origin at top-left
+          // and Y increases downward (standard)
+          sourceConfig.tileGrid = new TileGrid({
+            extent: extent,
+            resolutions: resolutions,
+            tileSize: tileSize,
+            origin: [extent[0], extent[3]]  // Top-left corner
+          });
+          
+          // Custom tile URL function for WMTS {z}/{y}/{x} pattern
+          sourceConfig.tileUrlFunction = (tileCoord) => {
+            if (!tileCoord) return '';
+            const z = tileCoord[0];
+            const x = tileCoord[1];
+            const y = tileCoord[2];
+            
+            // WMTS pattern: {z}/{y}/{x}
+            return layerConf.url
+              .replace('{z}', z.toString())
+              .replace('{y}', y.toString())
+              .replace('{x}', x.toString());
+          };
+        } else {
+          // Standard XYZ tiles (like GBIF)
+          sourceConfig.tileGrid = createXYZ({
+            extent: extent,
+            resolutions: resolutions,
+            tileSize: tileSize
+          });
+          sourceConfig.url = layerConf.url;
+        }
+      } else {
+        // No custom tile grid - use URL directly
+        sourceConfig.url = layerConf.url;
       }
-
-      // CRITICAL FIX: Use tileUrlFunction to ensure integer zoom levels
-      // GBIF uses standard XYZ tile scheme, so we just need integers
-      sourceConfig.tileUrlFunction = (tileCoord) => {
-        if (!tileCoord) return '';
-        
-        const z = tileCoord[0];
-        let x = tileCoord[1];
-        let y = tileCoord[2];
-        
-        // Replace placeholders in URL template
-        return layerConf.url
-          .replace('{z}', z.toString())
-          .replace('{x}', x.toString())
-          .replace('{y}', y.toString());
-      };
       
+      // Create the XYZ source and layer
       const source = new XYZ(sourceConfig);
-
       const olLayer = new TileLayer({
         source: source,
         visible: layerConf.visible,
-        zIndex: zIndex, // Set z-index
+        zIndex: zIndex,
         properties: { name: layerConf.name, id: layerId }
       });
 
@@ -169,7 +188,10 @@ export function useLayerManager(map) {
       visible: layer.active,
       zIndex: 100, // Overlays on top
       style: (feature) => {
-          if (feature.getGeometry().getType() === "Point") return pinStyle;
+          const geomType = feature.getGeometry().getType();
+          if (geomType === "Point" || geomType === "MultiPoint") {
+            return pinStyle;
+          }
           return vectorStyle;
       },
       properties: { id: layer._layerId }
