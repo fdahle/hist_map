@@ -79,6 +79,15 @@ onMounted(async () => {
     }
   } catch { /* server unreachable — leave adminEnabled as true (safe default) */ }
 
+  // Fetch viewer access status so the router guard and ribbon button are ready before config loads
+  try {
+    const viewerRes = await fetch(getApiUrl('/viewer/access-status'));
+    if (viewerRes.ok) {
+      const v = await viewerRes.json();
+      settingsStore.setViewerEnabled(v.viewerEnabled !== false);
+    }
+  } catch { /* server unreachable — leave viewerEnabled as true (safe default) */ }
+
   try {
     const res = await fetch(getApiUrl('/config'));
     if (res.status === 404) {

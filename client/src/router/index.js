@@ -31,6 +31,19 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  if (to.name === '3d-viewer') {
+    try {
+      const res = await fetch(getApiUrl('/viewer/access-status'))
+      if (res.ok) {
+        const v = await res.json()
+        if (v.viewerEnabled === false) {
+          useSettingsStore().setViewerEnabled(false)
+          return { name: 'map' }
+        }
+      }
+    } catch { /* server unreachable — allow through */ }
+  }
+
   if (to.name === 'admin') {
     // Always ask the server — don't rely on the store being populated yet
     // (e.g. direct browser navigation before App.vue has mounted)

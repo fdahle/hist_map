@@ -225,6 +225,19 @@ app.get('/admin/verify', authRateLimit, requireAdminAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+// Viewer access status — public, tells the client whether the 3D viewer is accessible
+app.get('/viewer/access-status', async (req, res) => {
+  try {
+    const yamlText = await fs.readFile(configFilePath, 'utf8');
+    const parsed = yaml.load(yamlText, { schema: yaml.CORE_SCHEMA });
+    const viewerEnabled = parsed?.ui?.viewer_access !== false;
+    res.json({ viewerEnabled });
+  } catch {
+    // No config yet or unreadable — allow access by default
+    res.json({ viewerEnabled: true });
+  }
+});
+
 // Health check endpoint — minimal response to avoid information disclosure
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });

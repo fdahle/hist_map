@@ -71,7 +71,7 @@
 
       <!-- View Tab -->
       <div v-if="activeTab === 'view'" class="ribbon-panel">
-        <div class="ribbon-group">
+        <div v-if="allowViewer" class="ribbon-group">
           <div class="ribbon-group-buttons">
             <button
               class="ribbon-btn"
@@ -438,6 +438,7 @@ const layerManager = inject('layerManager');
 const appConfig = inject('config');
 const allowDownload = computed(() => appConfig?.value?.ui?.map_download !== false);
 const allowUpload   = computed(() => appConfig?.value?.ui?.map_upload   !== false);
+const allowViewer   = computed(() => appConfig?.value?.ui?.viewer_access !== false);
 
 const activeTab = ref('main');
 const fileInput = ref(null);

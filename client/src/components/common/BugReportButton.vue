@@ -5,7 +5,6 @@
     target="_blank"
     rel="noopener noreferrer"
     class="bug-report-btn"
-    :class="{ 'with-info-bar': hasInfoBar }"
     title="Report a bug"
   >
     <span v-html="ICON_BUG"></span>
@@ -13,21 +12,17 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { ICON_BUG } from '@/constants/icons.js';
 
-const { showBugReportButton, showInfoBar } = storeToRefs(useSettingsStore());
-
-// Keep a readable boolean for template binding
-const hasInfoBar = computed(() => !!showInfoBar.value);
+const { showBugReportButton } = storeToRefs(useSettingsStore());
 </script>
 
 <style scoped>
 .bug-report-btn {
   position: absolute;
-  bottom: 12px;
+  top: 12px;
   left: 12px;
   z-index: 1001;
   display: flex;
@@ -56,9 +51,7 @@ const hasInfoBar = computed(() => !!showInfoBar.value);
   display: block;
 }
 
-.bug-report-btn.with-info-bar {
-  bottom: 40px;
-}
+
 
 /* Light theme */
 .theme-light .bug-report-btn {

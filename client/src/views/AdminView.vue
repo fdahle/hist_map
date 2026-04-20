@@ -265,72 +265,110 @@
             <h2 class="section-title">Viewer Permissions</h2>
             <p class="section-desc">Control which actions are available to users in the map and 3D viewer.</p>
           </div>
-          <div class="permissions-grid">
-            <label class="perm-card" :class="{ 'perm-card-on': draft.ui.map_download }">
-              <div class="perm-card-icon">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-              </div>
-              <div class="perm-card-body">
-                <span class="perm-card-title">Map — Download</span>
-                <span class="perm-card-desc">Users can download map data files</span>
-              </div>
-              <div class="perm-toggle-wrap">
-                <input :id="`perm-map-dl`" v-model="draft.ui.map_download" type="checkbox" class="perm-toggle-input" />
-                <label :for="`perm-map-dl`" class="perm-slider"></label>
-              </div>
-            </label>
+          <div class="perm-groups">
 
-            <label class="perm-card" :class="{ 'perm-card-on': draft.ui.map_upload }">
-              <div class="perm-card-icon">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-              </div>
-              <div class="perm-card-body">
-                <span class="perm-card-title">Map — Upload</span>
-                <span class="perm-card-desc">Users can drag &amp; drop files onto the map</span>
-              </div>
-              <div class="perm-toggle-wrap">
-                <input :id="`perm-map-ul`" v-model="draft.ui.map_upload" type="checkbox" class="perm-toggle-input" />
-                <label :for="`perm-map-ul`" class="perm-slider"></label>
-              </div>
-            </label>
+            <!-- ── Map ── -->
+            <div class="perm-group">
+              <span class="perm-group-label">Map</span>
+              <div class="permissions-grid">
+                <label class="perm-card" :class="{ 'perm-card-on': draft.ui.map_download }">
+                  <div class="perm-card-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                  </div>
+                  <div class="perm-card-body">
+                    <span class="perm-card-title">Download</span>
+                    <span class="perm-card-desc">Users can download map data files</span>
+                  </div>
+                  <div class="perm-toggle-wrap">
+                    <input :id="`perm-map-dl`" v-model="draft.ui.map_download" type="checkbox" class="perm-toggle-input" />
+                    <label :for="`perm-map-dl`" class="perm-slider"></label>
+                  </div>
+                </label>
 
-            <label class="perm-card" :class="{ 'perm-card-on': draft.ui.viewer_download }">
-              <div class="perm-card-icon">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                  <circle cx="19" cy="5" r="3" fill="currentColor" opacity="0.35" stroke="none"/>
-                </svg>
+                <label class="perm-card" :class="{ 'perm-card-on': draft.ui.map_upload }">
+                  <div class="perm-card-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                  </div>
+                  <div class="perm-card-body">
+                    <span class="perm-card-title">Upload</span>
+                    <span class="perm-card-desc">Users can load files onto the map</span>
+                  </div>
+                  <div class="perm-toggle-wrap">
+                    <input :id="`perm-map-ul`" v-model="draft.ui.map_upload" type="checkbox" class="perm-toggle-input" />
+                    <label :for="`perm-map-ul`" class="perm-slider"></label>
+                  </div>
+                </label>
               </div>
-              <div class="perm-card-body">
-                <span class="perm-card-title">3D Viewer — Download</span>
-                <span class="perm-card-desc">Users can export 3D scene data</span>
-              </div>
-              <div class="perm-toggle-wrap">
-                <input :id="`perm-v-dl`" v-model="draft.ui.viewer_download" type="checkbox" class="perm-toggle-input" />
-                <label :for="`perm-v-dl`" class="perm-slider"></label>
-              </div>
-            </label>
+            </div>
 
-            <label class="perm-card" :class="{ 'perm-card-on': draft.ui.viewer_upload }">
-              <div class="perm-card-icon">
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-                  <circle cx="19" cy="5" r="3" fill="currentColor" opacity="0.35" stroke="none"/>
-                </svg>
+            <!-- ── 3D Viewer ── -->
+            <div class="perm-group">
+              <span class="perm-group-label">3D Viewer</span>
+
+              <div class="permissions-grid">
+                <!-- Access — spans both columns -->
+                <label class="perm-card perm-card--span" :class="{ 'perm-card-on': draft.ui.viewer_access }">
+                  <div class="perm-card-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 12c0 4.97-4.03 9-9 9s-9-4.03-9-9 4.03-9 9-9 9 4.03 9 9z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </div>
+                  <div class="perm-card-body">
+                    <span class="perm-card-title">Access</span>
+                    <span class="perm-card-desc">Users can open the 3D viewer</span>
+                  </div>
+                  <div class="perm-toggle-wrap">
+                    <input :id="`perm-v-access`" v-model="draft.ui.viewer_access" type="checkbox" class="perm-toggle-input" />
+                    <label :for="`perm-v-access`" class="perm-slider"></label>
+                  </div>
+                </label>
+
+                <!-- Download & Upload — disabled when access is off -->
+                <label
+                  class="perm-card"
+                  :class="{ 'perm-card-on': draft.ui.viewer_download && draft.ui.viewer_access, 'perm-card-disabled': !draft.ui.viewer_access }"
+                >
+                  <div class="perm-card-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                  </div>
+                  <div class="perm-card-body">
+                    <span class="perm-card-title">Download</span>
+                    <span class="perm-card-desc">Users can export 3D scene data</span>
+                  </div>
+                  <div class="perm-toggle-wrap">
+                    <input :id="`perm-v-dl`" v-model="draft.ui.viewer_download" type="checkbox" class="perm-toggle-input" :disabled="!draft.ui.viewer_access" />
+                    <label :for="`perm-v-dl`" class="perm-slider"></label>
+                  </div>
+                </label>
+
+                <label
+                  class="perm-card"
+                  :class="{ 'perm-card-on': draft.ui.viewer_upload && draft.ui.viewer_access, 'perm-card-disabled': !draft.ui.viewer_access }"
+                >
+                  <div class="perm-card-icon">
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                  </div>
+                  <div class="perm-card-body">
+                    <span class="perm-card-title">Upload</span>
+                    <span class="perm-card-desc">Users can load 3D files into the viewer</span>
+                  </div>
+                  <div class="perm-toggle-wrap">
+                    <input :id="`perm-v-ul`" v-model="draft.ui.viewer_upload" type="checkbox" class="perm-toggle-input" :disabled="!draft.ui.viewer_access" />
+                    <label :for="`perm-v-ul`" class="perm-slider"></label>
+                  </div>
+                </label>
               </div>
-              <div class="perm-card-body">
-                <span class="perm-card-title">3D Viewer — Upload</span>
-                <span class="perm-card-desc">Users can load 3D files into the viewer</span>
-              </div>
-              <div class="perm-toggle-wrap">
-                <input :id="`perm-v-ul`" v-model="draft.ui.viewer_upload" type="checkbox" class="perm-toggle-input" />
-                <label :for="`perm-v-ul`" class="perm-slider"></label>
-              </div>
-            </label>
+            </div>
+
           </div>
         </section>
 
@@ -653,7 +691,7 @@ function blankDraft() {
     projection_params: { proj_string: '', extent: null },
     basemaps:     [],
     data_layers:  [],
-    ui: { map_download: true, map_upload: true, viewer_download: true, viewer_upload: true },
+    ui: { map_download: true, map_upload: true, viewer_download: true, viewer_upload: true, viewer_access: true },
   };
 }
 
@@ -847,6 +885,7 @@ function loadConfigIntoDraft(config) {
     d.ui.map_upload      = config.ui.map_upload      ?? config.ui.allow_upload   ?? true;
     d.ui.viewer_download = config.ui.viewer_download ?? config.ui.allow_download ?? true;
     d.ui.viewer_upload   = config.ui.viewer_upload   ?? config.ui.allow_upload   ?? true;
+    d.ui.viewer_access   = config.ui.viewer_access   ?? true;
   }
   draft.value = d;
   syncViewRaw();
@@ -876,6 +915,7 @@ function buildConfig() {
     map_upload:      d.ui.map_upload,
     viewer_download: d.ui.viewer_download,
     viewer_upload:   d.ui.viewer_upload,
+    viewer_access:   d.ui.viewer_access,
   };
   return out;
 }
@@ -1497,6 +1537,27 @@ onMounted(async () => {
   .permissions-grid { grid-template-columns: 1fr; }
 }
 
+.perm-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+.perm-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.perm-group-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--admin-muted, #888);
+}
+.perm-card--span {
+  grid-column: 1 / -1;
+}
+
 /* ── Permission cards ──────────────────────────────────────── */
 .perm-card {
   display: flex;
@@ -1517,6 +1578,11 @@ onMounted(async () => {
 .perm-card-on {
   border-color: rgba(59,130,246,0.45);
   background: rgba(59,130,246,0.06);
+}
+.perm-card-disabled {
+  opacity: 0.42;
+  pointer-events: none;
+  cursor: default;
 }
 .perm-card-icon {
   flex-shrink: 0;

@@ -30,6 +30,11 @@ export const useSettingsStore = defineStore("settings", () => {
   // true until the server explicitly says otherwise.
   const adminEnabled = ref(true);
   const setAdminEnabled = (val) => { adminEnabled.value = val; };
+
+  // Runtime flag — fetched from /viewer/access-status on app start.
+  // true until the server explicitly says otherwise.
+  const viewerEnabled = ref(true);
+  const setViewerEnabled = (val) => { viewerEnabled.value = val; };
   const selectionColor = persistedRef("settings_selectionColor", "#FFFF00");
   const theme = persistedRef("settings_theme", "dark");
   const showArrowButtons = persistedRef("settings_showArrowButtons", false);
@@ -61,5 +66,7 @@ export const useSettingsStore = defineStore("settings", () => {
     toggleBugReportButton,
     adminEnabled,
     setAdminEnabled,
+    viewerEnabled,
+    setViewerEnabled,
   };
 });
