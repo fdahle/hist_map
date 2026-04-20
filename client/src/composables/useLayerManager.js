@@ -17,6 +17,7 @@ import {
   createWMTSLayerConfig,
   createGeoJSONLayerConfig,
   createGeoTIFFLayerConfig,
+  buildColormapStyle,
 } from "../utils/layerFactory";
 import {
   Z_INDEX,
@@ -493,6 +494,23 @@ export function useLayerManager(map) {
           feature.set("_layerId", layer._layerId);
           if (!feature.get("_featureId")) feature.set("_featureId", fid);
 
+          // Inject thumbnail URL from config if not already set on the feature.
+          // Supports $<fieldname> and $<fieldname:start:end> (JS .slice) placeholders.
+          if (!feature.get("_thumbnailUrl") && layer.thumbnailUrl) {
+            const resolved = layer.thumbnailUrl.replace(/\$<([^>]+)>/g, (_, expr) => {
+              const parts = expr.split(':');
+              const val = feature.get(parts[0]);
+              if (val == null) return '';
+              const str = String(val);
+              if (parts.length === 1) return str;
+              const start = parts[1] !== '' ? parseInt(parts[1], 10) : 0;
+              if (parts.length === 2) return str.slice(start);
+              const end = parts[2] !== '' ? parseInt(parts[2], 10) : undefined;
+              return str.slice(start, end);
+            });
+            if (resolved) feature.set("_thumbnailUrl", resolved);
+          }
+
           // Track unique values for group_by
           if (layer.groupBy) {
             const val = feature.get(layer.groupBy);
@@ -659,6 +677,21 @@ export function useLayerManager(map) {
   };
 
   /**
+   * Rebuild the WebGL style for a single-band GeoTIFF layer with a new colormap.
+   * @param {string} layerId
+   * @param {string} colormapId - Key from COLORMAP_MAP (e.g. 'viridis')
+   */
+  const applyLayerColormap = (layerId, colormapId) => {
+    const layerObj = layerStore.getLayerById(layerId);
+    if (!layerObj?.layerInstance || layerObj.type !== 'geotiff') return;
+    const hasNoData =
+      layerObj.metadata?.noDataValue !== null &&
+      layerObj.metadata?.noDataValue !== undefined;
+    const newStyle = buildColormapStyle(colormapId, hasNoData, layerObj.colormapInverted ?? false);
+    layerObj.layerInstance.setStyle(newStyle);
+  };
+
+  /**
    * Force OL to re-render a grouped layer after a sub-category change.
    * Call this from the UI after toggling visibility or changing a group colour.
    */
@@ -780,5 +813,5 @@ export function useLayerManager(map) {
     }
   };
 
-  return { processLayer, removeLayer, cleanup, applyLayerColor, applySubCategories, searchIndex, setupSelection, setSelectionActive };
+  return { processLayer, removeLayer, cleanup, applyLayerColor, applyLayerColormap, applySubCategories, searchIndex, setupSelection, setSelectionActive };
 }

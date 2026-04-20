@@ -34,6 +34,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const theme = persistedRef("settings_theme", "dark");
   const showArrowButtons = persistedRef("settings_showArrowButtons", false);
   const showMapRibbon = persistedRef("settings_showMapRibbon", true);
+  const showBugReportButton = persistedRef("settings_showBugReportButton", true);
 
   // 2. ACTIONS
   const toggleInfoBar = () => { showInfoBar.value = !showInfoBar.value; };
@@ -42,6 +43,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const setTheme = (newTheme) => { theme.value = newTheme; };
   const toggleArrowButtons = () => { showArrowButtons.value = !showArrowButtons.value; };
   const toggleMapRibbon = () => { showMapRibbon.value = !showMapRibbon.value; };
+  const toggleBugReportButton = () => { showBugReportButton.value = !showBugReportButton.value; };
 
   return {
     showInfoBar,
@@ -55,6 +57,8 @@ export const useSettingsStore = defineStore("settings", () => {
     toggleArrowButtons,
     showMapRibbon,
     toggleMapRibbon,
+    showBugReportButton,
+    toggleBugReportButton,
     adminEnabled,
     setAdminEnabled,
   };

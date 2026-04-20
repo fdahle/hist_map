@@ -104,6 +104,8 @@ import { useMapStore } from "../../stores/map/mapStore";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { usePinStore } from "../../stores/map/pinStore";
 import { LAYER_STATUS, LAYER_CATEGORY } from "../../constants/layerConstants";
+import { fromBlob, fromUrl } from "geotiff";
+import { transform as olTransform, get as getOlProjection } from "ol/proj";
 
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
@@ -202,57 +204,95 @@ const handleInspectPoint = async () => {
 
   for (const layer of overlays) {
     if (layer.type === 'geotiff') {
-      const data = layer.layerInstance.getData(pixel);
-      if (!data || data.length === 0) continue;
+      // Read raw values directly from the GeoTIFF file instead of the WebGL
+      // canvas (getData) — the 8-bit normalised render path loses too much
+      // precision for elevation / scientific rasters.
+      try {
+        const meta = layer.metadata ?? {};
+        const { extent, tiffProjection, noDataValue, bands: metaBands } = meta;
+        const numBands = typeof metaBands === 'number' && metaBands > 0 ? metaBands : 1;
+        const mapCRS = map.getView().getProjection().getCode();
 
-      const { dataMin, dataMax, noDataValue, bands } = layer.metadata ?? {};
-      const numBands = typeof bands === 'number' && bands > 0 ? bands : 1;
-      const hasRange = dataMin !== null && dataMin !== undefined &&
-                       dataMax !== null && dataMax !== undefined &&
-                       dataMax > dataMin;
+        // Transform click coordinate to TIFF CRS
+        let tiffCoord = [...coordinate.value];
+        if (tiffProjection && tiffProjection !== mapCRS) {
+          const fromProj = getOlProjection(mapCRS);
+          const toProj   = getOlProjection(tiffProjection);
+          if (fromProj && toProj) {
+            tiffCoord = olTransform(tiffCoord, mapCRS, tiffProjection);
+          }
+        }
 
-      // With normalize:true OL stores tile data as Uint8Array (0–255):
-      //   stored = clamp(255 * (raw - min) / (max - min), 0, 255)
-      // When nodata is configured OL appends an extra alpha band after the data
-      // bands: data[numBands] === 0 means the pixel is transparent / nodata.
-      const hasAlpha = data.length > numBands;
-      const isNoData = hasAlpha && data[numBands] === 0;
+        // Check if the point falls inside the TIFF extent
+        if (extent) {
+          const [ex0, ey0, ex1, ey1] = extent;
+          if (tiffCoord[0] < ex0 || tiffCoord[0] > ex1 ||
+              tiffCoord[1] < ey0 || tiffCoord[1] > ey1) {
+            continue; // outside raster — skip
+          }
+        }
 
-      if (isNoData) {
+        // Open the TIFF
+        let tiff;
+        if (meta.file) {
+          tiff = await fromBlob(meta.file);
+        } else if (layer.url) {
+          tiff = await fromUrl(layer.url);
+        } else {
+          continue;
+        }
+
+        const image = await tiff.getImage();
+        const imgExtent = extent ?? image.getBoundingBox();
+        const imgW = image.getWidth();
+        const imgH = image.getHeight();
+        const extW = imgExtent[2] - imgExtent[0];
+        const extH = imgExtent[3] - imgExtent[1];
+
+        // Convert geographic coordinate to pixel indices
+        const col = Math.floor(((tiffCoord[0] - imgExtent[0]) / extW) * imgW);
+        const row = Math.floor(((imgExtent[3] - tiffCoord[1]) / extH) * imgH);
+        if (col < 0 || col >= imgW || row < 0 || row >= imgH) continue;
+
+        // Read a single pixel, all bands
+        const bandIndices = Array.from({ length: numBands }, (_, i) => i);
+        const rasters = await image.readRasters({
+          window: [col, row, col + 1, row + 1],
+          samples: bandIndices,
+        });
+
+        // Resolve effective nodata
+        const gdalNoData = image.getGDALNoData();
+        const effectiveNoData = (noDataValue !== undefined && noDataValue !== null)
+          ? noDataValue : gdalNoData;
+        const ndTol = (effectiveNoData !== null && effectiveNoData !== undefined)
+          ? Math.max(0.5, Math.abs(effectiveNoData) * 1e-6) : null;
+
+        // Extract values and check nodata
+        const values = [];
+        let allNoData = true;
+        for (let b = 0; b < numBands; b++) {
+          const raw = rasters[b][0];
+          if (!isFinite(raw) ||
+              (ndTol !== null && Math.abs(raw - effectiveNoData) <= ndTol)) {
+            values.push(NaN);
+          } else {
+            allNoData = false;
+            values.push(Number.isInteger(raw) ? raw : parseFloat(raw.toPrecision(6)));
+          }
+        }
+
         results.push({
           layerId: layer._layerId,
           name: layer.name,
           type: 'geotiff',
-          noData: true,
-          values: [],
+          noData: allNoData,
+          values: allNoData ? [] : values,
           unit: null,
         });
-        continue;
+      } catch (err) {
+        logger.warn('ContextMenu', `Failed to read raw GeoTIFF value for "${layer.name}":`, err.message);
       }
-
-      const values = [];
-      for (let b = 0; b < numBands && b < data.length; b++) {
-        let val = data[b];
-        if (hasRange) {
-          // Undo OL's 0–255 normalisation to recover the real data value.
-          val = (val / 255) * (dataMax - dataMin) + dataMin;
-          values.push(Number.isInteger(val) ? val : parseFloat(val.toPrecision(6)));
-        } else {
-          // No range info available — report as normalised 0–1.
-          values.push(parseFloat((val / 255).toPrecision(4)));
-        }
-      }
-
-      if (values.length === 0) continue;
-
-      results.push({
-        layerId: layer._layerId,
-        name: layer.name,
-        type: 'geotiff',
-        noData: false,
-        values,
-        unit: hasRange ? null : '(normalized 0–1)',
-      });
 
     } else {
       // Vector layer

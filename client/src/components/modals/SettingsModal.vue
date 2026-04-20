@@ -80,6 +80,25 @@
 
               <div class="setting-row">
                 <div class="setting-info">
+                  <label for="bug-report-toggle">Show Bug Report Button</label>
+                  <p class="setting-desc">
+                    Display a small bug icon in the bottom-left corner linking to the issue tracker.
+                  </p>
+                </div>
+
+                <div class="toggle-switch">
+                  <input
+                    id="bug-report-toggle"
+                    type="checkbox"
+                    :checked="showBugReportButton"
+                    @change="toggleBugReportButton"
+                  />
+                  <label for="bug-report-toggle" class="slider"></label>
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-info">
                   <label for="arrow-buttons-toggle">Show Layer Order Arrows</label>
                   <p class="setting-desc">
                     Display ▲▼ buttons for layer ordering. Drag &amp; drop always available.
@@ -157,8 +176,8 @@ const goToAdmin = () => {
 };
 
 // Extract State (Must use storeToRefs to keep it reactive!)
-const { showInfoBar, showArrowButtons, showMapRibbon, theme, adminEnabled } = storeToRefs(settingsStore);
-const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleTheme } = settingsStore;
+const { showInfoBar, showArrowButtons, showMapRibbon, showBugReportButton, theme, adminEnabled } = storeToRefs(settingsStore);
+const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleBugReportButton, toggleTheme } = settingsStore;
 </script>
 
 <style scoped>

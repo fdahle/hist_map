@@ -135,6 +135,20 @@
           </div>
           <span class="group-label">Bookmarks</span>
         </div>
+
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button @click="emit('save-image')" class="ribbon-btn" title="Save the current 3D view as a PNG image">
+              <span class="btn-icon" v-html="ICON_SAVE_IMAGE"></span>
+              <span class="btn-label">Save Image</span>
+            </button>
+            <button @click="emit('share-scene')" class="ribbon-btn" title="Share the current 3D camera view">
+              <span class="btn-icon" v-html="ICON_SHARE"></span>
+              <span class="btn-label">Share</span>
+            </button>
+          </div>
+          <span class="group-label">Export</span>
+        </div>
       </div>
 
       <!-- Tools Tab -->
@@ -354,6 +368,8 @@ import {
   ICON_INFO,
   ICON_PICK_XYZ,
   ICON_BOOKMARK_ADD,
+  ICON_SAVE_IMAGE,
+  ICON_SHARE,
 } from '@/constants/icons.js';
 
 const props = defineProps({
@@ -410,6 +426,8 @@ const emit = defineEmits([
   'toggle-bookmarks',
   'toggle-pick-mode',
   'ribbon-color-mode',
+  'save-image',
+  'share-scene',
 ]);
 
 const viewer3DStore = useViewer3DStore();

@@ -175,7 +175,7 @@ const initViewer = () => {
   setCamera(newCamera);
 
   // Renderer
-  const newRenderer = new THREE.WebGLRenderer({ antialias: true });
+  const newRenderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   newRenderer.setSize(viewerRef.value.clientWidth, viewerRef.value.clientHeight);
   newRenderer.setPixelRatio(window.devicePixelRatio);
   viewerRef.value.appendChild(newRenderer.domElement);
@@ -2624,6 +2624,18 @@ const applyColorMode = (layerId, mode) => {
   });
 };
 
+const saveImage = () => {
+  if (!renderer.value) return;
+  try {
+    const link = document.createElement('a');
+    link.download = '3d-scene.png';
+    link.href = renderer.value.domElement.toDataURL('image/png');
+    link.click();
+  } catch {
+    alert('Could not export image: scene contains cross-origin textures that block canvas export.');
+  }
+};
+
 // Expose methods for parent component
 defineExpose({
   cancelLoading,
@@ -2651,6 +2663,7 @@ defineExpose({
   processDroppedFiles,
   applyBookmark,
   applyColorMode,
+  saveImage,
 });
 </script>
 

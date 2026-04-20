@@ -29,8 +29,10 @@
       @vertical-exaggeration="onVerticalExaggeration"
       @pick-materials="triggerMtlFilePicker"
       @toggle-bookmarks="onToggleBookmarks"
+      @share-scene="isShareSceneOpen = true"
       @toggle-pick-mode="onTogglePickMode"
       @ribbon-color-mode="onRibbonColorMode"
+      @save-image="canvasRef?.saveImage()"
       :is-bookmarks-open="isBookmarksOpen"
     />
 
@@ -104,6 +106,7 @@
           <button @click="mtlHintMessage = null">&#10005;</button>
         </div>
         <input ref="mtlFileInputRef" type="file" multiple accept=".mtl,.jpg,.jpeg,.png,.bmp,.gif,.webp" style="display:none" @change="onMaterialFilePicked" />
+        <BugReportButton />
       </div>
 
       <!-- Drag-and-drop overlay covering the full scene area -->
@@ -150,6 +153,13 @@
       @close="isBookmarksOpen = false"
       @apply-bookmark="onApplyBookmark"
     />
+
+    <!-- Share 3D View Modal -->
+    <Share3DModal
+      :is-open="isShareSceneOpen"
+      @close="isShareSceneOpen = false"
+      @apply-view="onApplySharedView"
+    />
   </div>
 </template>
 
@@ -164,12 +174,15 @@ import LayerManager from '@/components/viewer3D/LayerManager.vue';
 import MeasurementModal from '@/components/modals/MeasurementModal.vue';
 import CoordPickerModal from '@/components/modals/CoordPickerModal.vue';
 import BookmarksModal from '@/components/modals/BookmarksModal.vue';
+import Share3DModal from '@/components/modals/Share3DModal.vue';
+import BugReportButton from '@/components/common/BugReportButton.vue';
 
 const canvasRef = ref(null);
 const layerManagerRef = ref(null);
 const selectedLayer3D = ref(null);
 const isCoordPickerOpen = ref(false);
 const isBookmarksOpen = ref(false);
+const isShareSceneOpen = ref(false);
 
 // Drag-and-drop state
 const isDragOver = ref(false);
@@ -668,6 +681,13 @@ const onRibbonLayerPointSize = ({ layer, size }) => {
 
 const onApplyBookmark = (bm) => {
   canvasRef.value?.applyBookmark(bm);
+};
+
+const onApplySharedView = (payload) => {
+  canvasRef.value?.applyBookmark({
+    position: payload.position,
+    target: payload.target,
+  });
 };
 
 const onTogglePickMode = () => {

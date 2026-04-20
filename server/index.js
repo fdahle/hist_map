@@ -419,7 +419,7 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
   try {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
-    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, csvLink } = req.body ?? {};
+    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, thumbnail_url, csvLink } = req.body ?? {};
     if (displayName  != null) meta.layerConfig.displayName  = String(displayName);
     if (visible      != null) meta.layerConfig.visible      = Boolean(visible);
     if (order        != null) meta.layerConfig.order        = Number(order);
@@ -433,6 +433,7 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     if (fill_color   != null) meta.layerConfig.fill_color   = String(fill_color);
     if (attribution  != null) meta.layerConfig.attribution  = String(attribution);
     if (Array.isArray(search_fields)) meta.layerConfig.search_fields = search_fields.map(String);
+    if ('thumbnail_url' in (req.body ?? {})) meta.layerConfig.thumbnail_url = thumbnail_url ? String(thumbnail_url) : null;
     // CRS override (any layer type)
     const { sourceCrs, tiffProjection } = req.body ?? {};
     if (sourceCrs != null) meta.layerConfig.sourceCrs = String(sourceCrs);

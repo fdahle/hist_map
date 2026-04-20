@@ -183,14 +183,7 @@
         <!-- ── Footer ─── -->
         <footer class="modal-footer">
           <div class="footer-status">
-            <span v-if="saveError" class="footer-msg footer-msg-error">{{ saveError }}</span>
-            <span v-else-if="saving" class="footer-msg footer-msg-saving">
-              <svg class="spin" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:4px;vertical-align:-1px">
-                <path d="M12 2a10 10 0 0110 10" opacity="0.3"/><path d="M12 2a10 10 0 000 20a10 10 0 0010-10"/>
-              </svg>
-              Saving…
-            </span>
-            <span v-else-if="saveSuccess" class="footer-msg footer-msg-success">{{ saveSuccess }}</span>
+            <span v-if="hasAnyAssignment" class="footer-msg footer-msg-pending">Pending — click "Save configuration" to apply</span>
           </div>
           <div class="footer-actions">
             <button class="btn-close" @click="$emit('close')">Close</button>
@@ -202,27 +195,24 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, watchEffect } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { getApiUrl } from '../../../utils/config.js';
 import Asset3DUploadModal from './Asset3DUploadModal.vue';
 
 const props = defineProps({
-  isOpen:     { type: Boolean, required: true },
-  layerId:    { type: String,  required: true },
-  authHeader: { type: String,  required: true },
+  isOpen:             { type: Boolean, required: true },
+  layerId:            { type: String,  required: true },
+  authHeader:         { type: String,  required: true },
+  initialAssignments: { type: Object,  default: undefined }, // pending assignments held by parent
 });
 
-const emit = defineEmits(['close', 'saved']);
+const emit = defineEmits(['close', 'assignments-changed']);
 
 // ── State ──────────────────────────────────────────────────────────────────────
 
-const loading    = ref(false);
-const loadError  = ref('');
-const saving     = ref(false);
-const saveError  = ref('');
-const saveSuccess = ref('');
-let _saveTimer = null;
-let _isInitialLoad = false;
+const loading        = ref(false);
+const loadError      = ref('');
+let _isInitialLoad   = false;
 
 const models      = ref([]);  // { filename, dataPath }
 const pointclouds = ref([]);  // { filename, dataPath }
@@ -330,7 +320,6 @@ function onDrop(featureId) {
     if (!assign.pointclouds.includes(url)) assign.pointclouds = [...assign.pointclouds, url];
   }
   dragging.value = null;
-  scheduleSave();
 }
 
 function removeAsset(featureId, type, url) {
@@ -340,23 +329,18 @@ function removeAsset(featureId, type, url) {
   } else {
     assign.pointclouds = assign.pointclouds.filter(u => u !== url);
   }
-  scheduleSave();
 }
 
 function clearAll() {
   for (const fid of Object.keys(assignments.value)) {
     assignments.value[fid] = { models: [], pointclouds: [] };
   }
-  scheduleSave();
 }
 
 // ── Data loading ───────────────────────────────────────────────────────────────
 
 watch(() => props.isOpen, async (open) => {
   if (!open) {
-    clearTimeout(_saveTimer);
-    saveError.value   = '';
-    saveSuccess.value = '';
     uploadError.value = '';
     return;
   }
@@ -411,7 +395,10 @@ async function loadData() {
       })
       .filter(f => f.featureId);
 
-    assignments.value = initial;
+    // Use pending assignments from parent if available, otherwise use GeoJSON state
+    assignments.value = props.initialAssignments !== undefined
+      ? { ...props.initialAssignments }
+      : initial;
     filterQuery.value = '';
   } catch (err) {
     loadError.value = err.message ?? 'Failed to load data.';
@@ -501,33 +488,11 @@ async function deleteAsset(asset) {
 
 // ── Auto-save ──────────────────────────────────────────────────────────────────
 
-function scheduleSave() {
-  if (_isInitialLoad) return;
-  clearTimeout(_saveTimer);
-  saveSuccess.value = '';
-  _saveTimer = setTimeout(save, 600);
-}
+// ── Emit assignment changes to parent (deferred save) ──────────
 
-async function save() {
-  if (_isInitialLoad || loading.value) return;
-  saving.value    = true;
-  saveError.value = '';
-  try {
-    const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/link`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: props.authHeader },
-      body: JSON.stringify({ assignments: assignments.value }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`);
-    saveSuccess.value = `Saved — ${data.linkedCount} feature${data.linkedCount !== 1 ? 's' : ''} linked`;
-    emit('saved');
-  } catch (err) {
-    saveError.value = err.message ?? 'Save failed.';
-  } finally {
-    saving.value = false;
-  }
-}
+watch(assignments, () => {
+  if (!_isInitialLoad) emit('assignments-changed', { ...assignments.value });
+}, { deep: true });
 </script>
 
 <style scoped>
@@ -924,9 +889,7 @@ async function save() {
   display: inline-flex;
   align-items: center;
 }
-.footer-msg-error   { color: #dc2626; }
-.footer-msg-success { color: #16a34a; }
-.footer-msg-saving  { color: var(--admin-muted, #777); }
+.footer-msg-pending { color: #d97706; font-style: italic; }
 
 .footer-actions {
   display: flex;

@@ -148,27 +148,32 @@
           </div>
           <div class="fields-stack">
             <div class="field-row-2">
-              <div class="field-group">
+              <div class="field-group" :class="{ 'field-invalid': fieldErrors.centerX }">
                 <label>Centre X (projected)<FieldHint text="X coordinate in the map's projection units. For EPSG:4326 use longitude (decimal degrees)." /></label>
-                <input v-model.number="draft.view.center[0]" type="number" />
+                <input type="text" :value="viewRaw.centerX" placeholder="0" @input="onViewInput('centerX', $event.target.value)" />
+                <p v-if="fieldErrors.centerX" class="field-error-msg">{{ fieldErrors.centerX }}</p>
               </div>
-              <div class="field-group">
+              <div class="field-group" :class="{ 'field-invalid': fieldErrors.centerY }">
                 <label>Centre Y (projected)<FieldHint text="Y coordinate in the map's projection units. For EPSG:4326 use latitude (decimal degrees)." /></label>
-                <input v-model.number="draft.view.center[1]" type="number" />
+                <input type="text" :value="viewRaw.centerY" placeholder="0" @input="onViewInput('centerY', $event.target.value)" />
+                <p v-if="fieldErrors.centerY" class="field-error-msg">{{ fieldErrors.centerY }}</p>
               </div>
             </div>
             <div class="field-row-3">
-              <div class="field-group">
+              <div class="field-group" :class="{ 'field-invalid': fieldErrors.zoom }">
                 <label>Zoom<FieldHint text="Initial zoom level when the map loads. Higher values zoom in further (0 = world view, 14 ≈ street level)." /></label>
-                <input v-model.number="draft.view.zoom" type="number" min="0" max="28" step="0.5" />
+                <input type="text" :value="viewRaw.zoom" placeholder="7" @input="onViewInput('zoom', $event.target.value)" />
+                <p v-if="fieldErrors.zoom" class="field-error-msg">{{ fieldErrors.zoom }}</p>
               </div>
-              <div class="field-group">
+              <div class="field-group" :class="{ 'field-invalid': fieldErrors.minZoom }">
                 <label>Min Zoom<FieldHint text="Furthest out the user can zoom. Must be ≤ initial Zoom and less than Max Zoom." /></label>
-                <input v-model.number="draft.view.minZoom" type="number" min="0" max="28" />
+                <input type="text" :value="viewRaw.minZoom" placeholder="0" @input="onViewInput('minZoom', $event.target.value)" />
+                <p v-if="fieldErrors.minZoom" class="field-error-msg">{{ fieldErrors.minZoom }}</p>
               </div>
-              <div class="field-group">
+              <div class="field-group" :class="{ 'field-invalid': fieldErrors.maxZoom }">
                 <label>Max Zoom<FieldHint text="Furthest in the user can zoom. Must be ≥ initial Zoom and greater than Min Zoom." /></label>
-                <input v-model.number="draft.view.maxZoom" type="number" min="0" max="28" />
+                <input type="text" :value="viewRaw.maxZoom" placeholder="28" @input="onViewInput('maxZoom', $event.target.value)" />
+                <p v-if="fieldErrors.maxZoom" class="field-error-msg">{{ fieldErrors.maxZoom }}</p>
               </div>
             </div>
             <div class="field-group">
@@ -188,10 +193,11 @@
             <p class="section-desc">Use any EPSG code. Add a custom proj string for non-standard CRS.</p>
           </div>
           <div class="fields-stack">
-            <div class="field-group">
+            <div class="field-group" :class="{ 'field-invalid': fieldErrors.crs }">
               <label>EPSG Code <span class="required">*</span><FieldHint text="Standard CRS identifier. Common values: EPSG:3857 (Web Mercator), EPSG:4326 (WGS84), EPSG:3031 (Antarctic)." /></label>
-              <input v-model="draft.crs" type="text" placeholder="EPSG:3857" @input="crsChangeSaveConfirming = false" @change="onCrsChange" />
-              <p v-if="crsWarning" class="field-warn">⚠ {{ crsWarning }}</p>
+              <input v-model="draft.crs" type="text" placeholder="EPSG:3857" @input="crsChangeSaveConfirming = false; fieldErrors = {}" @change="onCrsChange" />
+              <p v-if="fieldErrors.crs" class="field-error-msg">{{ fieldErrors.crs }}</p>
+              <p v-else-if="crsWarning" class="field-warn">⚠ {{ crsWarning }}</p>
               <p v-if="crsChangedWithData" class="field-warn">
                 ⚠ CRS changed from <strong>{{ loadedCrs }}</strong> — server-uploaded data layers were preprocessed for the old CRS. Re-process your data files after saving.
               </p>
@@ -250,6 +256,7 @@
           :auth-header="currentAuthHeader"
           :dev-mode="layerDevMode"
           @update:layers="draft.data_layers = $event"
+          @pending-changes="hasPendingLayerChanges = $event"
         />
 
         <!-- ── 7. Viewer Permissions ──────────────────────────── -->
@@ -589,6 +596,7 @@ const loginError       = ref('');
 const loadError        = ref('');
 const saveSuccess      = ref(false);
 const validationError  = ref('');
+const fieldErrors      = ref({});
 const passwordFieldRef = ref(null);
 const dataLayersSectionRef = ref(null);
 const loadedCrs             = ref(null);  // CRS from the last saved config
@@ -652,6 +660,46 @@ function blankDraft() {
 const draft = ref(blankDraft());
 const viewExtentStr = ref('');
 const projExtentStr = ref('');
+
+// Raw string values for the numeric view fields so the user sees what they
+// typed rather than a silently blanked input when they enter non-numeric text.
+const viewRaw = ref({ centerX: '0', centerY: '0', zoom: '7', minZoom: '0', maxZoom: '28' });
+
+function syncViewRaw() {
+  const v = draft.value.view;
+  viewRaw.value = {
+    centerX: String(v.center?.[0] ?? ''),
+    centerY: String(v.center?.[1] ?? ''),
+    zoom:    String(v.zoom    ?? ''),
+    minZoom: String(v.minZoom ?? ''),
+    maxZoom: String(v.maxZoom ?? ''),
+  };
+}
+
+function onViewInput(field, raw) {
+  viewRaw.value[field] = raw;
+  const trimmed = raw.trim();
+  if (trimmed === '') {
+    // Allow clearing — don't update the draft numeric value, just show no error
+    const errs = { ...fieldErrors.value };
+    delete errs[field];
+    fieldErrors.value = errs;
+    return;
+  }
+  const parsed = Number(trimmed);
+  if (isNaN(parsed)) {
+    fieldErrors.value = { ...fieldErrors.value, [field]: 'Must be a number.' };
+  } else {
+    const errs = { ...fieldErrors.value };
+    delete errs[field];
+    fieldErrors.value = errs;
+    if      (field === 'centerX') draft.value.view.center = [parsed, draft.value.view.center[1]];
+    else if (field === 'centerY') draft.value.view.center = [draft.value.view.center[0], parsed];
+    else if (field === 'zoom')    draft.value.view.zoom    = parsed;
+    else if (field === 'minZoom') draft.value.view.minZoom = parsed;
+    else if (field === 'maxZoom') draft.value.view.maxZoom = parsed;
+  }
+}
 
 // ── Live warnings ──────────────────────────────────────────────
 const viewWarnings = computed(() => {
@@ -723,6 +771,7 @@ function onCrsChange() {
   draft.value.view.maxZoom = preset.maxZoom;
   viewExtentStr.value      = '';
   draft.value.view.extent  = null;
+  syncViewRaw();
 }
 
 const crsWarning = computed(() => {
@@ -745,9 +794,11 @@ const crsChangedWithData = computed(() =>
 );
 
 // ── Unsaved changes tracking ───────────────────────────────────
-const savedSnapshot = ref(null);
+const savedSnapshot          = ref(null);
+const hasPendingLayerChanges = ref(false);
 const isDirty = computed(() => {
   if (!hasExistingConfig.value || savedSnapshot.value === null) return false;
+  if (hasPendingLayerChanges.value) return true;
   try { return JSON.stringify(buildConfig()) !== savedSnapshot.value; }
   catch { return false; }
 });
@@ -798,6 +849,7 @@ function loadConfigIntoDraft(config) {
     d.ui.viewer_upload   = config.ui.viewer_upload   ?? config.ui.allow_upload   ?? true;
   }
   draft.value = d;
+  syncViewRaw();
 }
 
 function buildConfig() {
@@ -937,7 +989,32 @@ function logout() {
 // ── Save ───────────────────────────────────────────────────────
 async function saveConfig() {
   validationError.value = '';
+  fieldErrors.value     = {};
   saveSuccess.value     = false;
+
+  // ── Field-level validation ─────────────────────────────────
+  const errs = {};
+  const v = draft.value.view;
+  if (v.minZoom != null && v.maxZoom != null && v.minZoom >= v.maxZoom) {
+    errs.minZoom = 'Must be less than Max Zoom.';
+    errs.maxZoom = 'Must be greater than Min Zoom.';
+  }
+  if (!errs.zoom && v.minZoom != null && v.zoom != null && v.minZoom > v.zoom) {
+    errs.zoom = 'Must be ≥ Min Zoom.';
+  }
+  if (!errs.zoom && v.maxZoom != null && v.zoom != null && v.maxZoom < v.zoom) {
+    errs.zoom = 'Must be ≤ Max Zoom.';
+  }
+  const crsVal = (draft.value.crs || '').trim();
+  if (crsVal && !/^EPSG:\d+$/i.test(crsVal)) {
+    errs.crs = 'Must be in the format EPSG:XXXX (e.g. EPSG:3857).';
+  }
+  if (Object.keys(errs).length) {
+    fieldErrors.value     = errs;
+    validationError.value = 'Please fix the highlighted fields before saving.';
+    return;
+  }
+
   const config = buildConfig();
   try {
     validateConfig(config);
@@ -953,7 +1030,13 @@ async function saveConfig() {
   }
   isSaving.value = true;
   try {
-    const yamlText = yaml.dump(config, { lineWidth: 120, noRefs: true });
+    // Flush pending layer patches (settings + CSV links + 3D model links) to meta.json first
+    if (dataLayersSectionRef.value?.flushPendingChanges) {
+      await dataLayersSectionRef.value.flushPendingChanges();
+    }
+    // Rebuild config after flush so freshly-saved layer data is included
+    const finalConfig = buildConfig();
+    const yamlText = yaml.dump(finalConfig, { lineWidth: 120, noRefs: true });
     const res = await fetch(getApiUrl('/config'), {
       method: 'PUT',
       headers: { 'Content-Type': 'text/yaml', Authorization: buildAuthHeader(getStoredPassword()) },
@@ -964,11 +1047,12 @@ async function saveConfig() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Server error: ${res.status}`);
     }
-    saveSuccess.value       = true;
-    hasExistingConfig.value = true;
-    loadedCrs.value = draft.value.crs;
+    saveSuccess.value           = true;
+    hasExistingConfig.value     = true;
+    hasPendingLayerChanges.value = false;
+    loadedCrs.value             = draft.value.crs;
     crsChangeSaveConfirming.value = false;
-    savedSnapshot.value     = JSON.stringify(buildConfig());
+    savedSnapshot.value         = JSON.stringify(buildConfig());
     setTimeout(() => { saveSuccess.value = false; }, 5000);
   } catch (err) {
     validationError.value = err.message;
@@ -1092,9 +1176,10 @@ async function deleteAllFiles() {
   }
 }
 
-// ── Warn before leaving during first-time setup ─────────────────
+// ── Warn before leaving during first-time setup or with unsaved changes ────
 function handleBeforeUnload(e) {
-  if (isAuthenticated.value && !hasExistingConfig.value) {
+  if (window._adminDownloading) return;
+  if (isAuthenticated.value && (!hasExistingConfig.value || isDirty.value)) {
     e.preventDefault();
     e.returnValue = '';
   }
@@ -1805,6 +1890,18 @@ details.collapsible:not([open]) > summary {
   background: rgba(21, 128, 61, 0.09);
   border: 1px solid rgba(21, 128, 61, 0.25);
   border-radius: 4px;
+}
+/* ── Field-level validation errors ─────────────────────────── */
+.field-invalid input,
+.field-invalid select,
+.field-invalid textarea {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.18);
+}
+.field-error-msg {
+  margin: 0.2rem 0 0;
+  font-size: 0.76rem;
+  color: #ef4444;
 }
 
 .yaml-collapsible { margin-top: 0; }

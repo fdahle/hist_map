@@ -9,6 +9,39 @@ import WMTSTileGrid from "ol/tilegrid/WMTS";
 import TileWMS from "ol/source/TileWMS";
 import GeoTIFF from "ol/source/GeoTIFF";
 import { DEFAULT_TILE_SIZE } from "../constants/layerConstants";
+import { COLORMAP_MAP } from "../constants/colormaps";
+
+/**
+ * Build a WebGL tile style expression for a given colormap.
+ * Works with normalize:true — band values arrive in [0, 1] from OL.
+ * When hasNoData is true, OL appends an alpha band (band 2) that masks nodata pixels.
+ *
+ * @param {string} colormapId - Key from COLORMAP_MAP (e.g. 'viridis'). Falls back to grayscale.
+ * @param {boolean} hasNoData
+ * @returns {object} OL WebGL style object  { color: [...] }
+ */
+export function buildColormapStyle(colormapId, hasNoData, inverted = false) {
+  const alpha = hasNoData ? ['band', 2] : 1;
+  const colormap = COLORMAP_MAP[colormapId];
+
+  if (!colormap || colormapId === 'grayscale') {
+    if (inverted) {
+      const v = ['-', 1, ['band', 1]];
+      return { color: ['array', v, v, v, alpha] };
+    }
+    return { color: ['array', ['band', 1], ['band', 1], ['band', 1], alpha] };
+  }
+
+  const stops = inverted
+    ? colormap.stops.map(([pos, r, g, b]) => [1 - pos, r, g, b]).sort((a, b) => a[0] - b[0])
+    : colormap.stops;
+
+  const rInterp = ['interpolate', ['linear'], ['band', 1], ...stops.flatMap(([pos, r])     => [pos, r])];
+  const gInterp = ['interpolate', ['linear'], ['band', 1], ...stops.flatMap(([pos, , g])   => [pos, g])];
+  const bInterp = ['interpolate', ['linear'], ['band', 1], ...stops.flatMap(([pos, , , b]) => [pos, b])];
+
+  return { color: ['array', rInterp, gInterp, bInterp, alpha] };
+}
 
 // OpenLayers XYZ uses {a-c} for subdomains; Leaflet / common configs use {s}.
 // Convert {s} so browser can resolve the hostname.
@@ -32,6 +65,7 @@ export function createTileLayerConfig(layerConf, map, zIndex, layerId) {
     attributions: layerConf.attribution,
     projection: projection,
     wrapX: false,
+    crossOrigin: 'anonymous',
   };
 
   // Add tile grid if custom resolutions are provided (for polar projections)
@@ -111,6 +145,7 @@ export function createWMSLayerConfig(layerConf, map, zIndex, layerId) {
     },
     projection: map.getView().getProjection(),
     attributions: layerConf.attribution,
+    crossOrigin: 'anonymous',
   });
 
   const olLayer = new TileLayer({
@@ -145,6 +180,7 @@ export function createWMTSLayerConfig(layerConf, map, zIndex, layerId) {
     matrixSet: layerConf.matrixSet,
     format: layerConf.format,
     projection: map.getView().getProjection(),
+    crossOrigin: 'anonymous',
     tileGrid: new WMTSTileGrid({
       origin: layerConf.origin || [-4194304, 4194304],
       resolutions: layerConf.resolutions || [8192, 4096, 2048, 1024, 512, 256],
@@ -192,6 +228,7 @@ export function createGeoJSONLayerConfig(layerConf, layerId) {
     searchFields: layerConf.search_fields || [],
     metadata: layerConf._metadata || {},
     groupBy: layerConf.group_by ?? null,
+    thumbnailUrl: layerConf.thumbnail_url ?? null,
   };
 }
 
@@ -222,11 +259,9 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
   if (layerConf.style) {
     resolvedStyle = layerConf.style;
   } else if (isSingleBand) {
-    // With normalize:true the band arrives already in [0,1] → direct grayscale.
-    // When nodata is configured OL appends an alpha band (band 2) that is 0 for
-    // nodata pixels and 1 for valid ones — use it so nodata is fully transparent.
-    const alpha = hasNoData ? ['band', 2] : 1;
-    resolvedStyle = { color: ['array', ['band', 1], ['band', 1], ['band', 1], alpha] };
+    // With normalize:true the band arrives already in [0,1].
+    // Apply the requested colormap (defaults to grayscale).
+    resolvedStyle = buildColormapStyle(layerConf.colormap ?? 'grayscale', hasNoData);
   } else {
     resolvedStyle = undefined;
   }

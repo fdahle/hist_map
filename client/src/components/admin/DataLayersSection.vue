@@ -309,7 +309,6 @@
                 <div class="color-row">
                   <input type="color" class="color-swatch"
                     :value="/^#[0-9a-f]{6}$/i.test(editDraft.fill_color) ? editDraft.fill_color : '#000000'"
-                    :disabled="!editDraft.fill_color || editDraft.fill_color === 'none'"
                     @input="editDraft.fill_color = $event.target.value" />
                   <input v-model="editDraft.fill_color" type="text" placeholder="none" />
                 </div>
@@ -351,6 +350,27 @@
               </div>
             </div>
 
+            <!-- Thumbnail -->
+            <div class="edit-section-heading">Thumbnail</div>
+            <div class="edit-row">
+              <div class="edit-field edit-field-grow">
+                <label>Thumbnail URL <span class="edit-field-hint">(use <code>$&lt;fieldname&gt;</code> or <code>$&lt;fieldname:start:end&gt;</code> for substrings)</span></label>
+                <input v-model="editDraft.thumbnail_url" type="text" placeholder="https://example.com/$<id:0:6>/$<id:0:9>/$<id>_thumb.jpg" />
+                <span class="edit-field-hint" style="display:block;margin-top:3px">
+                  Embed feature fields with <code>$&lt;fieldname&gt;</code>. Use <code>$&lt;fieldname:start:end&gt;</code> for a substring slice — e.g. <code>$&lt;photo_id:0:6&gt;</code> gives the first 6 characters.
+                  <template v-if="dataPreview && dataPreview.columns.length">
+                    Available: <span
+                      v-for="col in dataPreview.columns"
+                      :key="col"
+                      class="thumb-field-chip"
+                      :title="'Insert $<' + col + '>'"
+                      @click="editDraft.thumbnail_url += '$<' + col + '>'"
+                    >{{ col }}</span>
+                  </template>
+                </span>
+              </div>
+            </div>
+
             <!-- Data head preview -->
             <div class="data-preview-section">
               <button class="edit-preview-toggle" @click="toggleDataPreview(layer.id)">
@@ -384,19 +404,15 @@
 
           <!-- Edit panel footer -->
           <div class="edit-footer">
-            <a
+            <button
               v-if="layer.keepOriginal"
-              :href="getApiUrl('/admin/layers/' + layer.id + '/original')"
-              download
               class="btn-secondary-sm"
               title="Download the original unoptimized file"
-            >↓ Original</a>
+              @click="onDownloadOriginal(layer)"
+            >↓ Original</button>
             <span class="edit-footer-spacer" />
             <span v-if="editError" class="edit-error">{{ editError }}</span>
-            <button class="btn-secondary-sm" @click="cancelEdit">Cancel</button>
-            <button class="btn-primary-sm" :disabled="editSaving" @click="saveEdit(layer.id)">
-              {{ editSaving ? 'Saving…' : 'Save' }}
-            </button>
+            <button class="btn-secondary-sm" @click="cancelEdit">Done</button>
           </div>
         </div>
       </div>
@@ -416,8 +432,9 @@
       :is-open="linkModal.open"
       :layer-id="linkModal.layerId"
       :auth-header="props.authHeader"
+      :initial-assignments="pendingModelLinks.get(linkModal.layerId)"
       @close="linkModal.open = false"
-      @saved="fetchLayers"
+      @assignments-changed="onAssignmentsChanged"
     />
 
     <!-- CSV data linking modal -->
@@ -425,8 +442,9 @@
       :is-open="linkDataModal.open"
       :layer-id="linkDataModal.layerId"
       :auth-header="props.authHeader"
+      :initial-link="pendingCsvLinks.get(linkDataModal.layerId)"
       @close="linkDataModal.open = false"
-      @saved="fetchLayers"
+      @link-changed="onLinkChanged"
     />
 
     <!-- Debug modal -->
@@ -456,7 +474,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { getApiUrl } from '../../utils/config';
 import UploadSettingsModal from '../modals/admin/UploadSettingsModal.vue';
 import LinkingModal from '../modals/admin/LinkingModal.vue';
@@ -467,7 +485,7 @@ const props = defineProps({
   devMode:    { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['update:layers']);
+const emit = defineEmits(['update:layers', 'pending-changes']);
 
 // ── State ───────────────────────────────────────────────────────
 const layers        = ref([]);
@@ -480,9 +498,10 @@ const deletePending = ref({});
 const deleteConfirmId = ref(null);
 const editingId       = ref(null);
 const editDraft       = ref({});
-const editSaving      = ref(false);
 const editError       = ref('');
 const searchFieldsStr = ref('');
+let editAutoSaveTimer = null;
+let ignoreNextEditChange = false;
 const debugModalLayer = ref(null);
 const debugModalTab   = ref('config');
 const dataPreviewOpen    = ref(false);
@@ -498,6 +517,11 @@ let pollTimer = null;
 const linkModal     = ref({ open: false, layerId: '' });
 const linkDataModal = ref({ open: false, layerId: '' });
 
+// ── Pending changes (committed on "Save Configuration") ─────────
+const pendingPatches     = reactive(new Map()); // layerId → PATCH payload
+const pendingCsvLinks    = reactive(new Map()); // layerId → csvLink obj | null
+const pendingModelLinks  = reactive(new Map()); // layerId → assignments obj
+
 // Companion file upload (add MTL / textures to an existing model layer)
 const companionFileInputRef    = ref(null);
 const companionTargetLayerId   = ref(null);
@@ -512,6 +536,10 @@ const sortedLayers = computed(() =>
 const hasOptimizing = computed(() =>
   layers.value.some(l => l.status === 'optimizing')
 );
+const hasPendingChanges = computed(() =>
+  pendingPatches.size > 0 || pendingCsvLinks.size > 0 || pendingModelLinks.size > 0
+);
+watch(hasPendingChanges, val => emit('pending-changes', val));
 
 // ── Lifecycle ───────────────────────────────────────────────────
 onMounted(async () => {
@@ -523,7 +551,7 @@ onUnmounted(() => {
   stopPolling();
 });
 
-defineExpose({ fetchLayers });
+defineExpose({ fetchLayers, flushPendingChanges });
 
 // ── API helpers ─────────────────────────────────────────────────
 function authHeaders(extra = {}) {
@@ -538,12 +566,112 @@ async function fetchLayers() {
     const res = await fetch(getApiUrl('/admin/layers'), { headers: authHeaders() });
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
     layers.value = await res.json();
+    // Re-apply any pending settings patches so the UI stays consistent during polling
+    for (const [layerId, patch] of pendingPatches) {
+      const idx = layers.value.findIndex(l => l.id === layerId);
+      if (idx !== -1) applyPatchToLayerConfig(layers.value[idx].layerConfig, patch);
+    }
     emitLayers();
   } catch (err) {
     loadError.value = err.message;
   } finally {
     isLoading.value = false;
   }
+}
+
+// ── Pending-change helpers ───────────────────────────────────────
+
+/**
+ * Apply a server PATCH payload to a layerConfig object in-place.
+ * Mirrors the server-side update logic so the UI stays in sync without
+ * a round-trip.
+ */
+function applyPatchToLayerConfig(lc, patch) {
+  if ('displayName'    in patch) lc.displayName    = patch.displayName;
+  if ('visible'        in patch) lc.visible        = patch.visible;
+  if ('order'          in patch) lc.order          = patch.order;
+  if ('color'          in patch) lc.color          = patch.color;
+  if ('stroke_color'   in patch) lc.stroke_color   = patch.stroke_color;
+  if ('fill_color'     in patch) lc.fill_color     = patch.fill_color;
+  if ('thumbnail_url'  in patch) lc.thumbnail_url  = patch.thumbnail_url || null;
+  if ('attribution'    in patch) lc.attribution    = patch.attribution;
+  if ('search_fields'  in patch) lc.search_fields  = patch.search_fields;
+  if ('opacity'        in patch) lc.opacity        = patch.opacity;
+  if ('noDataValue'    in patch) lc.noDataValue    = patch.noDataValue;
+  if ('normalize'      in patch) lc.normalize      = patch.normalize;
+  if ('tiffProjection' in patch) lc.tiffProjection = patch.tiffProjection;
+  if ('sourceCrs'      in patch) lc.sourceCrs      = patch.sourceCrs;
+}
+
+/**
+ * Send all accumulated pending changes to the server.
+ * Called by AdminView just before it writes config.yaml.
+ */
+async function flushPendingChanges() {
+  const errors = [];
+
+  for (const [layerId, patch] of pendingPatches) {
+    try {
+      const res = await fetch(getApiUrl(`/admin/layers/${layerId}`), {
+        method: 'PATCH',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        errors.push(body.error || `Layer ${layerId.slice(0, 8)} save failed`);
+      }
+    } catch (err) {
+      errors.push(String(err?.message ?? err));
+    }
+  }
+  pendingPatches.clear();
+
+  for (const [layerId, csvLink] of pendingCsvLinks) {
+    try {
+      const res = await fetch(getApiUrl(`/admin/layers/${layerId}`), {
+        method: 'PATCH',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ csvLink }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        errors.push(body.error || `CSV link save failed`);
+      }
+    } catch (err) {
+      errors.push(String(err?.message ?? err));
+    }
+  }
+  pendingCsvLinks.clear();
+
+  for (const [layerId, assignments] of pendingModelLinks) {
+    try {
+      const res = await fetch(getApiUrl(`/admin/layers/${layerId}/link`), {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ assignments }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        errors.push(body.error || `3D link save failed`);
+      }
+    } catch (err) {
+      errors.push(String(err?.message ?? err));
+    }
+  }
+  pendingModelLinks.clear();
+
+  if (errors.length) throw new Error(errors.join('; '));
+}
+
+// ── Modal pending-change handlers ────────────────────────────────
+
+function onLinkChanged(csvLink) {
+  pendingCsvLinks.set(linkDataModal.value.layerId, csvLink);
+}
+
+function onAssignmentsChanged(assignments) {
+  pendingModelLinks.set(linkModal.value.layerId, assignments);
 }
 
 // ── Polling ─────────────────────────────────────────────────────
@@ -570,7 +698,7 @@ function metaToEntry(meta) {
     visible: lc.visible ?? true,
     order:   lc.order   ?? 0,
   };
-  const extras = ['color', 'stroke_color', 'fill_color', 'attribution', 'tileSize', 'search_fields'];
+  const extras = ['color', 'stroke_color', 'fill_color', 'attribution', 'tileSize', 'search_fields', 'thumbnail_url'];
   for (const k of extras) {
     if (lc[k] != null) entry[k] = lc[k];
   }
@@ -590,10 +718,33 @@ function metaToEntry(meta) {
 }
 
 function emitLayers() {
-  // Only emit layer types that make sense as map config entries
+  // Only emit layer types that make sense as map config entries.
+  // If a layer is currently being edited, merge the live draft values so that
+  // AdminView's isDirty check reacts immediately (without waiting for the server PATCH).
   const configEntries = layers.value
     .filter(l => ['geojson', 'geotiff'].includes(l.fileType))
-    .map(metaToEntry);
+    .map(l => {
+      if (l.id !== editingId.value) return metaToEntry(l);
+      const d = editDraft.value;
+      const lc = l.layerConfig || {};
+      const merged = {
+        ...l,
+        layerConfig: {
+          ...lc,
+          displayName:  d.displayName  ?? lc.displayName,
+          visible:      d.visible      ?? lc.visible,
+          order:        d.order        ?? lc.order,
+          color:        d.color        || lc.color,
+          stroke_color: d.stroke_color || lc.stroke_color,
+          fill_color:   d.fill_color   || lc.fill_color,
+          attribution:  d.attribution  || lc.attribution,
+          thumbnail_url: d.thumbnail_url !== undefined ? (d.thumbnail_url || null) : lc.thumbnail_url,
+          search_fields: searchFieldsStr.value
+            .split(',').map(s => s.trim()).filter(Boolean),
+        },
+      };
+      return metaToEntry(merged);
+    });
   emit('update:layers', configEntries);
 }
 
@@ -834,6 +985,18 @@ async function deleteSubFile(layerId, subId) {
 }
 
 // ── Edit flow ───────────────────────────────────────────────────
+function scheduleEditAutoSave() {
+  if (ignoreNextEditChange) return;
+  emitLayers(); // update isDirty immediately
+  clearTimeout(editAutoSaveTimer);
+  editAutoSaveTimer = setTimeout(() => {
+    if (editingId.value) saveEdit(editingId.value, { closePanel: false });
+  }, 600);
+}
+
+watch(editDraft, scheduleEditAutoSave, { deep: true });
+watch(searchFieldsStr, scheduleEditAutoSave);
+
 function toggleEdit(layer) {
   if (editingId.value === layer.id) {
     cancelEdit();
@@ -843,6 +1006,7 @@ function toggleEdit(layer) {
   dataPreviewOpen.value = false;
   dataPreview.value = null;
   dataPreviewError.value = '';
+  ignoreNextEditChange = true;
   const lc = layer.layerConfig || {};
   editDraft.value = {
     displayName:  lc.displayName  ?? '',
@@ -852,6 +1016,7 @@ function toggleEdit(layer) {
     color:        lc.color        ?? '',
     stroke_color: lc.stroke_color ?? '',
     fill_color:   lc.fill_color   ?? '',
+    thumbnail_url: lc.thumbnail_url ?? '',
     // GeoTIFF extras
     opacity:      lc.opacity      ?? null,
     noDataValue:  lc.noDataValue  ?? null,
@@ -864,9 +1029,37 @@ function toggleEdit(layer) {
   searchFieldsStr.value = (lc.search_fields ?? []).join(', ');
   editingId.value = layer.id;
   editError.value = '';
+  nextTick(() => { ignoreNextEditChange = false; });
+}
+
+async function onDownloadOriginal(layer) {
+  window._adminDownloading = true;
+  setTimeout(() => { window._adminDownloading = false; }, 2000);
+  try {
+    const res = await fetch(getApiUrl(`/admin/layers/${layer.id}/original`), { headers: authHeaders() });
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    const blob = await res.blob();
+    const ext = layer.originalName?.split('.').pop() ?? 'bin';
+    const filename = layer.originalName ?? `${layer.id}.${ext}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    editError.value = err.message;
+  }
 }
 
 function cancelEdit() {
+  // If a debounced save is pending, flush it immediately before closing.
+  if (editAutoSaveTimer !== null && editingId.value) {
+    clearTimeout(editAutoSaveTimer);
+    editAutoSaveTimer = null;
+    saveEdit(editingId.value, { closePanel: false });
+  }
+  ignoreNextEditChange = false;
   editingId.value = null;
   editError.value = '';
   searchFieldsStr.value = '';
@@ -895,46 +1088,34 @@ async function toggleDataPreview(layerId) {
   }
 }
 
-async function saveEdit(id) {
-  editSaving.value = true;
-  editError.value  = '';
-  try {
-    // Parse search_fields from comma-separated string
-    const parsedSearchFields = searchFieldsStr.value
-      .split(',').map(s => s.trim()).filter(Boolean);
-    // Strip empty strings before sending
-    const patch = Object.fromEntries(
-      Object.entries(editDraft.value).filter(([k, v]) => k !== 'crsOverride' && v !== '' && v != null)
-    );
-    patch.search_fields = parsedSearchFields;
-    // CRS override — map to the right server field per layer type
-    const layer = layers.value.find(l => l.id === id);
-    const crsVal = editDraft.value.crsOverride?.trim() || null;
-    if (layer?.fileType === 'geotiff') {
-      patch.tiffProjection = crsVal;   // null clears the override
-    } else if (crsVal) {
-      patch.sourceCrs = crsVal;
-    }
-    const res = await fetch(getApiUrl(`/admin/layers/${id}`), {
-      method: 'PATCH',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(patch),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Save failed (${res.status})`);
-    }
-    const updated = await res.json();
-    // Update local layer record
-    const idx = layers.value.findIndex(l => l.id === id);
-    if (idx !== -1) layers.value[idx] = updated;
-    editingId.value = null;
-    emitLayers();
-  } catch (err) {
-    editError.value = err.message;
-  } finally {
-    editSaving.value = false;
+function saveEdit(id, { closePanel = false } = {}) {
+  editError.value = '';
+
+  // Build the same patch shape the server expects
+  const parsedSearchFields = searchFieldsStr.value
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const patch = Object.fromEntries(
+    Object.entries(editDraft.value).filter(([k, v]) => k !== 'crsOverride' && v !== '' && v != null)
+  );
+  patch.search_fields = parsedSearchFields;
+  patch.thumbnail_url = editDraft.value.thumbnail_url ?? '';
+  const layer = layers.value.find(l => l.id === id);
+  const crsVal = editDraft.value.crsOverride?.trim() || null;
+  if (layer?.fileType === 'geotiff') {
+    patch.tiffProjection = crsVal;
+  } else if (crsVal) {
+    patch.sourceCrs = crsVal;
   }
+
+  // Apply locally — no server round-trip until "Save Configuration"
+  const idx = layers.value.findIndex(l => l.id === id);
+  if (idx !== -1) {
+    applyPatchToLayerConfig(layers.value[idx].layerConfig, patch);
+    pendingPatches.set(id, { ...(pendingPatches.get(id) ?? {}), ...patch });
+  }
+
+  if (closePanel) editingId.value = null;
+  emitLayers();
 }
 </script>
 
@@ -1235,6 +1416,24 @@ input:checked + .slider::before { transform: translateX(16px); }
 .edit-footer { display: flex; align-items: center; gap: 0.5rem; }
 .edit-footer-spacer { flex: 1; }
 .edit-field-hint { font-size: 0.75rem; color: var(--admin-muted, #888); font-weight: 400; }
+.edit-field-hint code { font-family: monospace; font-size: 0.8em; background: var(--admin-bg, #f3f4f6); padding: 0 3px; border-radius: 3px; }
+
+/* Clickable field-name chips in the thumbnail hint */
+.thumb-field-chip {
+  display: inline-block;
+  margin: 2px 3px 0 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.73rem;
+  font-family: monospace;
+  background: var(--admin-bg, #f3f4f6);
+  border: 1px solid var(--admin-border, #d1d5db);
+  color: #3b82f6;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+.thumb-field-chip:hover { background: #dbeafe; border-color: #93c5fd; }
 .checkbox-label { display: flex; align-items: baseline; gap: 0.35rem; cursor: pointer; font-size: 0.82rem; }
 
 /* Data head preview */

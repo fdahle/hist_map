@@ -13,6 +13,8 @@
       @share-scene="isShareSceneOpen = true"
       @extended-search="onExtendedSearch"
       @toggle-pins="onTogglePins"
+      @toggle-bookmarks="isBookmarksOpen = !isBookmarksOpen"
+      :is-bookmarks-open="isBookmarksOpen"
     />
 
     <div
@@ -56,6 +58,7 @@
       <AttributionOverlay />
       <InformationBar v-if="settingsStore.showInfoBar" />
       <AttributePanel />
+      <BugReportButton />
 
       <!-- Notification toast -->
       <Transition name="notification">
@@ -83,6 +86,8 @@
         </div>
       </div>
     </div>
+
+    <MapBookmarksModal :is-visible="isBookmarksOpen" @close="isBookmarksOpen = false" />
 
     <SettingsModal :is-open="isSettingsOpen" @close="isSettingsOpen = false" />
 
@@ -113,6 +118,7 @@
       @toggle-draw="onToggleElevationDraw"
       @finish-draw="onFinishElevationDraw"
       @hover-profile="onElevationHoverProfile"
+      @reset-profile="onResetElevationProfile"
     />
 
     <CsvColumnPickerModal
@@ -157,6 +163,8 @@ import ExtendedSearchModal from "../components/modals/ExtendedSearchModal.vue";
 import SettingsModal from "../components/modals/SettingsModal.vue";
 import CsvColumnPickerModal from "../components/modals/CsvColumnPickerModal.vue";
 import PinPanel from "../components/map/PinPanel.vue";
+import BugReportButton from "../components/common/BugReportButton.vue";
+import MapBookmarksModal from "../components/modals/MapBookmarksModal.vue";
 import { useSettingsStore } from "../stores/settingsStore";
 import { tryRegisterProjection } from "../utils/crs";
 // Re-setup the local state
@@ -168,6 +176,7 @@ const isLayerPanelOpen = ref(false);
 const isShareSceneOpen = ref(false);
 const isExtendedSearchOpen = ref(false);
 const isPinsOpen = ref(false);
+const isBookmarksOpen = ref(false);
 
 // Layer panel resize
 const LP_MIN = 180, LP_MAX = 480, LP_DEFAULT = 280;
@@ -604,6 +613,11 @@ const closeElevationModal = () => {
   layerManagerRef.value?.setSelectionActive(true);
 };
 
+const onResetElevationProfile = () => {
+  stopElevationDraw();
+  elevationProfile.value = null;
+};
+
 const onToggleElevationDraw = (layerId, noDataOverride) => {
   if (isElevationDrawing.value) {
     stopElevationDraw();
@@ -704,14 +718,24 @@ const _sampleLinePoints = (coords, numSamples) => {
   return pts;
 };
 
-const _bilinear = (data, w, h, fx, fy, noData) => {
-  const x0 = Math.max(0, Math.min(w - 1, Math.floor(fx)));
+const _bilinear = (data, w, h, fx, fy) => {
+  // Clamp to the valid pixel centre range so edge samples don't extrapolate.
+  const fxc = Math.max(0, Math.min(w - 1, fx));
+  const fyc = Math.max(0, Math.min(h - 1, fy));
+  const x0 = Math.floor(fxc);
   const x1 = Math.min(w - 1, x0 + 1);
-  const y0 = Math.max(0, Math.min(h - 1, Math.floor(fy)));
+  const y0 = Math.floor(fyc);
   const y1 = Math.min(h - 1, y0 + 1);
-  const wx = fx - x0, wy = fy - y0;
+  // Weights are always in [0, 1] after clamping fxc/fyc above.
+  const wx = fxc - x0, wy = fyc - y0;
   const vs = [data[y0 * w + x0], data[y0 * w + x1], data[y1 * w + x0], data[y1 * w + x1]];
-  if (vs.some(v => !isFinite(v) || (noData !== null && noData !== undefined && v === noData))) return NaN;
+  // If any bilinear neighbour is nodata (NaN), fall back to nearest-neighbour.
+  // This prevents one nodata border pixel from masking valid samples that are
+  // only a fraction of a pixel away from the valid region.
+  if (vs.some(v => !isFinite(v))) {
+    const nn = data[Math.round(fyc) * w + Math.round(fxc)];
+    return isFinite(nn) ? nn : NaN;
+  }
   return vs[0] * (1 - wx) * (1 - wy) + vs[1] * wx * (1 - wy) + vs[2] * (1 - wx) * wy + vs[3] * wx * wy;
 };
 
@@ -738,16 +762,7 @@ const computeElevationProfile = async (layerId, lineGeom, noDataOverride) => {
     }
   }
 
-  // Bounding box of sample points with padding
-  const xs = tiffPts.map(p => p[0]);
-  const ys = tiffPts.map(p => p[1]);
-  const pad = 1e-6;
-  const bbox = [
-    Math.min(...xs) - pad, Math.min(...ys) - pad,
-    Math.max(...xs) + pad, Math.max(...ys) + pad,
-  ];
-
-  // Open the tiff (prefer File blob for local drag-dropped files)
+  // Open the tiff early so we can compute pixel-aware padding
   let tiff;
   if (file) {
     tiff = await fromBlob(file);
@@ -767,15 +782,55 @@ const computeElevationProfile = async (layerId, lineGeom, noDataOverride) => {
     : (noDataValue !== undefined && noDataValue !== null) ? noDataValue
     : gdalNoData;
 
-  // Determine read resolution: cap at 1024, scale proportionally to bbox aspect ratio
+  const fullExtent = extent ?? image.getBoundingBox();
+  const fullW = fullExtent[2] - fullExtent[0];
+  const fullH = fullExtent[3] - fullExtent[1];
+
+  // Compute pixel-aware padding: at least 2 source pixels so readRasters
+  // never returns nodata-filled edge pixels for points inside the raster.
+  const pixelSizeX = imgW > 0 ? fullW / imgW : 1;
+  const pixelSizeY = imgH > 0 ? fullH / imgH : 1;
+  const pad = Math.max(pixelSizeX, pixelSizeY) * 2;
+
+  // Bounding box of sample points with pixel-aware padding
+  const xs = tiffPts.map(p => p[0]);
+  const ys = tiffPts.map(p => p[1]);
+  let bbox = [
+    Math.min(...xs) - pad, Math.min(...ys) - pad,
+    Math.max(...xs) + pad, Math.max(...ys) + pad,
+  ];
+
+  // Validate against the TIFF's actual extent. If there is no overlap at all,
+  // return NaN for every sample point so the profile shows a gap instead of
+  // phantom data from out-of-bounds readRasters behaviour.
+  if (extent) {
+    const [ex0, ey0, ex1, ey1] = extent;
+    const noOverlap = bbox[0] > ex1 || bbox[2] < ex0 || bbox[1] > ey1 || bbox[3] < ey0;
+    if (noOverlap) {
+      return { elevations: new Array(samplePts.length).fill(NaN), totalLength };
+    }
+    // Clip the read bbox to the extent so readRasters never requests data outside
+    // the TIFF's coverage (which can return zeros or other default values).
+    bbox = [
+      Math.max(bbox[0], ex0), Math.max(bbox[1], ey0),
+      Math.min(bbox[2], ex1), Math.min(bbox[3], ey1),
+    ];
+  }
+
+  // Determine read resolution: cap at 1024, scale proportionally to bbox aspect ratio.
+  // Also cap against the number of source pixels that actually fall in the read bbox so
+  // we never request more pixels than the TIFF has in that region (avoids over-smoothing
+  // when the bbox is a small sub-region of a large TIFF).
   const bboxW = bbox[2] - bbox[0];
   const bboxH = bbox[3] - bbox[1];
+  const srcPixelsW = fullW > 0 ? Math.ceil((bboxW / fullW) * imgW) : imgW;
+  const srcPixelsH = fullH > 0 ? Math.ceil((bboxH / fullH) * imgH) : imgH;
   const aspect = bboxW > 0 && bboxH > 0 ? bboxW / bboxH : 1;
   const MAX_RES = 1024;
-  const readW = Math.max(4, Math.min(MAX_RES, Math.round(aspect >= 1 ? MAX_RES : MAX_RES * aspect), imgW));
-  const readH = Math.max(4, Math.min(MAX_RES, Math.round(aspect >= 1 ? MAX_RES / aspect : MAX_RES), imgH));
+  const readW = Math.max(4, Math.min(MAX_RES, Math.round(aspect >= 1 ? MAX_RES : MAX_RES * aspect), srcPixelsW));
+  const readH = Math.max(4, Math.min(MAX_RES, Math.round(aspect >= 1 ? MAX_RES / aspect : MAX_RES), srcPixelsH));
 
-  const [rawRaster] = await image.readRasters({
+  const [rawRaster] = await tiff.readRasters({
     bbox,
     width: readW,
     height: readH,
@@ -801,11 +856,22 @@ const computeElevationProfile = async (layerId, lineGeom, noDataOverride) => {
   }
 
   // Sample elevations along the profile
+  const [ex0, ey0, ex1, ey1] = extent ?? [];
+  // Small tolerance (0.01 % of extent size) so floating-point rounding at the
+  // exact boundary doesn't incorrectly flag edge-points as outside.
+  const xTol = extent ? (ex1 - ex0) * 1e-4 : 0;
+  const yTol = extent ? (ey1 - ey0) * 1e-4 : 0;
   const elevations = tiffPts.map(([x, y]) => {
-    const fx = ((x - bbox[0]) / (bbox[2] - bbox[0])) * (readW - 1);
-    const fy = ((bbox[3] - y) / (bbox[3] - bbox[1])) * (readH - 1);
-    if (fx < 0 || fx > readW - 1 || fy < 0 || fy > readH - 1) return NaN;
-    return _bilinear(data, readW, readH, fx, fy, null); // nodata already NaN'd
+    // Reject points that lie outside the TIFF's geographic coverage.
+    if (extent && (x < ex0 - xTol || x > ex1 + xTol || y < ey0 - yTol || y > ey1 + yTol)) return NaN;
+    // Pixel-as-area convention: readRasters places output pixel c's centre at
+    //   x = bbox[0] + (c + 0.5) / readW * bboxW
+    // Invert to get the floating-point pixel coordinate for our sample.
+    const fx = ((x - bbox[0]) / bboxW) * readW - 0.5;
+    const fy = ((bbox[3] - y) / bboxH) * readH - 0.5;
+    // Reject points clearly outside the sampled area (> half a pixel outside).
+    if (fx < -0.5 || fx > readW - 0.5 || fy < -0.5 || fy > readH - 0.5) return NaN;
+    return _bilinear(data, readW, readH, fx, fy); // nodata already NaN'd
   });
 
   return { elevations, totalLength };

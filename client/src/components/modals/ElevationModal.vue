@@ -198,6 +198,11 @@
         </div>
       </template>
 
+      <!-- All-NaN: profile was computed but line is entirely outside the DEM -->
+      <div v-else-if="allNaN && !isDrawing && !isLoading" class="out-of-bounds-hint">
+        The drawn line is outside the DEM coverage area. Try drawing within the raster bounds.
+      </div>
+
       <!-- Empty state -->
       <div v-else-if="!isDrawing && !isLoading" class="empty-state">
         Select a source and draw a line on the map to generate an elevation profile.
@@ -222,7 +227,7 @@ const props = defineProps({
   isLoading:   { type: Boolean, default: false },
   profileData: { type: Object,  default: null  },
 });
-const emit = defineEmits(['close', 'toggle-draw', 'finish-draw', 'hover-profile']);
+const emit = defineEmits(['close', 'toggle-draw', 'finish-draw', 'hover-profile', 'reset-profile']);
 
 const layerStore = useLayerStore();
 const { layers } = storeToRefs(layerStore);
@@ -255,9 +260,21 @@ watch(singleBandLayers, (list) => {
   }
 }, { immediate: true });
 
+// Reset the profile when the user switches DEM source.
+watch(internalLayerId, (newId, oldId) => {
+  if (oldId !== null && newId !== oldId) {
+    emit('reset-profile');
+  }
+});
+
 // ── Chart computations ───────────────────────────────────────────────────────
 const hasData = computed(() =>
   props.profileData?.elevations?.some(v => isFinite(v))
+);
+
+// Profile was computed but every sample is NaN (line is outside DEM coverage).
+const allNaN = computed(() =>
+  props.profileData?.elevations != null && !hasData.value
 );
 
 const profileStats = computed(() => {
@@ -819,6 +836,23 @@ const onChartMouseLeave = () => {
   padding: 8px 0;
 }
 .theme-light .empty-state { color: #999; }
+
+/* ── Out-of-bounds hint ── */
+.out-of-bounds-hint {
+  font-size: 12px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 5px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  text-align: center;
+}
+.theme-light .out-of-bounds-hint {
+  color: #b45309;
+  background: rgba(245, 158, 11, 0.06);
+  border-color: rgba(180, 83, 9, 0.25);
+}
 
 /* ── Hover interaction ── */
 .chart-hover-overlay {

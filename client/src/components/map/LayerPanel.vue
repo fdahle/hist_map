@@ -690,7 +690,6 @@ const handleTouchEnd = (event) => {
   border-right: 1px solid #ddd;
   display: flex;
   flex-direction: column;
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
   font-family: "Segoe UI", sans-serif;
   z-index: 2000;
   pointer-events: auto;

@@ -195,3 +195,9 @@ export const ICON_PICK_XYZ = `<svg viewBox="0 0 24 24" width="20" height="20" fi
 
 /** Bookmark with plus (add bookmark) */
 export const ICON_BOOKMARK_ADD = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><line x1="12" y1="8" x2="12" y2="14"/><line x1="9" y1="11" x2="15" y2="11"/></svg>`;
+
+/** Bug / issue report */
+export const ICON_BUG = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l1.5 1.5"/><path d="M14.5 3.5L16 2"/><path d="M9 9h6"/><path d="M9 13h6"/><path d="M12 21c-3.31 0-6-2.69-6-6V9a3 3 0 0 1 3-3h6a3 3 0 0 1 3 3v6c0 3.31-2.69 6-6 6z"/><path d="M6 10H3"/><path d="M21 10h-3"/><path d="M6 16H3"/><path d="M21 16h-3"/></svg>`;
+
+/** Save image / screenshot */
+export const ICON_SAVE_IMAGE = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;

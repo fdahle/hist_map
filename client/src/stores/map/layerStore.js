@@ -84,6 +84,8 @@ export const useLayerStore = defineStore("layers", () => {
       strokeColor,
       fillColor,
       renderMode,
+      colormap: 'grayscale',
+      colormapInverted: false,
       url,
       progress: 0,
       status: initialStatus,
@@ -253,6 +255,20 @@ export const useLayerStore = defineStore("layers", () => {
     layerObj.color = newColor;
   };
 
+  // Updates the stored colormap for a raster layer.
+  // The composable's applyLayerColormap() applies the new WebGL style.
+  const updateLayerColormap = (layerId, colormapId) => {
+    const layerObj = layerIndex.get(layerId);
+    if (!layerObj) return;
+    layerObj.colormap = colormapId;
+  };
+
+  const updateLayerColormapInverted = (layerId, inverted) => {
+    const layerObj = layerIndex.get(layerId);
+    if (!layerObj) return;
+    layerObj.colormapInverted = inverted;
+  };
+
   // --- Sub-category actions ---
 
   /**
@@ -411,6 +427,8 @@ export const useLayerStore = defineStore("layers", () => {
     setLayerError,
     setCrsCompatibility,
     updateLayerColor,
+    updateLayerColormap,
+    updateLayerColormapInverted,
     retryLayer,
     cancelLayerLoad,
     registerCancelHandler,

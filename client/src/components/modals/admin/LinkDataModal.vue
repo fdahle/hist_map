@@ -143,17 +143,13 @@
         <!-- ── Footer ─── -->
         <footer class="modal-footer">
           <div class="footer-status">
-            <span v-if="saveError"   class="footer-error">{{ saveError }}</span>
-            <span v-else-if="saveSuccess" class="footer-success">{{ saveSuccess }}</span>
+            <span v-if="canSave || hasSavedLink" class="footer-pending">Pending — click "Save configuration" to apply</span>
           </div>
           <div class="footer-actions">
-            <button v-if="hasSavedLink" class="btn-clear" :disabled="saving" @click="clearLink">
+            <button v-if="hasSavedLink" class="btn-clear" @click="clearLink">
               Clear link
             </button>
-            <button class="btn-cancel" @click="$emit('close')">Cancel</button>
-            <button class="btn-save" :disabled="saving || loading || !canSave" @click="save">
-              {{ saving ? 'Saving…' : 'Save' }}
-            </button>
+            <button class="btn-cancel" @click="$emit('close')">Close</button>
           </div>
         </footer>
 
@@ -163,24 +159,22 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { getApiUrl } from '../../../utils/config.js';
 
 const props = defineProps({
-  isOpen:     { type: Boolean, required: true },
-  layerId:    { type: String,  required: true },
-  authHeader: { type: String,  required: true },
+  isOpen:      { type: Boolean, required: true },
+  layerId:     { type: String,  required: true },
+  authHeader:  { type: String,  required: true },
+  initialLink: { type: Object,  default: undefined }, // pending link held by parent
 });
 
-const emit = defineEmits(['close', 'saved']);
+const emit = defineEmits(['close', 'link-changed']);
 
 // ── State ──────────────────────────────────────────────────────
 
 const loading     = ref(false);
 const loadError   = ref('');
-const saving      = ref(false);
-const saveError   = ref('');
-const saveSuccess = ref('');
 const uploading   = ref(false);
 const uploadError = ref('');
 const deleting    = ref('');
@@ -204,6 +198,24 @@ const canSave = computed(() =>
   joinConfig.value.csvJoinColumn &&
   joinConfig.value.featureJoinProperty.trim()
 );
+
+// ── Emit changes to parent (deferred save) ─────────────────────
+
+function emitLinkChanged() {
+  if (!canSave.value) return;
+  emit('link-changed', {
+    subFileId:           selectedCsvId.value,
+    csvJoinColumn:       joinConfig.value.csvJoinColumn,
+    featureJoinProperty: joinConfig.value.featureJoinProperty.trim(),
+  });
+}
+
+watch(joinConfig, emitLinkChanged, { deep: true });
+watch(selectedCsvId, async (newId, oldId) => {
+  if (!newId || newId === oldId) return;
+  await nextTick();
+  emitLinkChanged();
+});
 
 // ── Lifecycle ──────────────────────────────────────────────────
 
@@ -232,14 +244,16 @@ async function loadData() {
     layerDisplayName.value = meta.layerConfig?.displayName || meta.originalName || '';
     csvFiles.value = (meta.subFiles ?? []).filter(sf => sf.role === 'attributes');
 
-    // Restore previously saved join config
-    const saved = meta.layerConfig?.csvLink ?? null;
-    if (saved && saved.subFileId) {
+    // Use pending link from parent if available, otherwise fall back to server state
+    const active = props.initialLink !== undefined
+      ? props.initialLink
+      : (meta.layerConfig?.csvLink ?? null);
+    if (active && active.subFileId) {
       hasSavedLink.value                   = true;
-      selectedCsvId.value                  = saved.subFileId;
-      joinConfig.value.csvJoinColumn       = saved.csvJoinColumn       ?? '';
-      joinConfig.value.featureJoinProperty = saved.featureJoinProperty ?? '';
-      await loadCsvColumns(saved.subFileId);
+      selectedCsvId.value                  = active.subFileId;
+      joinConfig.value.csvJoinColumn       = active.csvJoinColumn       ?? '';
+      joinConfig.value.featureJoinProperty = active.featureJoinProperty ?? '';
+      await loadCsvColumns(active.subFileId);
     } else {
       hasSavedLink.value  = false;
       selectedCsvId.value = '';
@@ -362,38 +376,6 @@ async function onCsvSelected(e) {
   }
 }
 
-// ── Save ───────────────────────────────────────────────────────
-
-async function save() {
-  saving.value      = true;
-  saveError.value   = '';
-  saveSuccess.value = '';
-  try {
-    const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: props.authHeader },
-      body: JSON.stringify({
-        csvLink: {
-          subFileId:            selectedCsvId.value,
-          csvJoinColumn:        joinConfig.value.csvJoinColumn,
-          featureJoinProperty:  joinConfig.value.featureJoinProperty.trim(),
-        },
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Server error ${res.status}`);
-    }
-    hasSavedLink.value = true;
-    saveSuccess.value  = 'Data link saved.';
-    emit('saved');
-    setTimeout(() => { saveSuccess.value = ''; }, 4000);
-  } catch (err) {
-    saveError.value = err.message ?? 'Save failed.';
-  } finally {
-    saving.value = false;
-  }
-}
 
 // ── Delete CSV sub-file ───────────────────────────────────────
 
@@ -425,31 +407,11 @@ async function deleteCsv(id) {
 
 // ── Clear link ─────────────────────────────────────────────────
 
-async function clearLink() {
-  saving.value      = true;
-  saveError.value   = '';
-  saveSuccess.value = '';
-  try {
-    const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: props.authHeader },
-      body: JSON.stringify({ csvLink: null }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Server error ${res.status}`);
-    }
-    hasSavedLink.value  = false;
-    selectedCsvId.value = '';
-    joinConfig.value    = { csvJoinColumn: '', featureJoinProperty: '' };
-    saveSuccess.value   = 'Link cleared.';
-    emit('saved');
-    setTimeout(() => { saveSuccess.value = ''; }, 3000);
-  } catch (err) {
-    saveError.value = err.message ?? 'Clear failed.';
-  } finally {
-    saving.value = false;
-  }
+function clearLink() {
+  hasSavedLink.value  = false;
+  selectedCsvId.value = '';
+  joinConfig.value    = { csvJoinColumn: '', featureJoinProperty: '' };
+  emit('link-changed', null);
 }
 </script>
 
@@ -787,8 +749,7 @@ async function clearLink() {
 .footer-status { flex: 1; }
 .footer-actions { display: flex; align-items: center; gap: 0.5rem; }
 
-.footer-error   { font-size: 0.82rem; color: #ef4444; }
-.footer-success { font-size: 0.82rem; color: #16a34a; }
+.footer-pending { font-size: 0.82rem; color: #d97706; font-style: italic; }
 
 .btn-cancel {
   padding: 0.45rem 0.9rem;
