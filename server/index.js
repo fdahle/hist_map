@@ -904,6 +904,47 @@ app.use((err, req, res, next) => {
   });
 });
 
+// Ensure a default config.yaml exists so the client can always start cleanly
+const DEFAULT_CONFIG_YAML = `# Stratum3D map configuration
+# Edit via the Admin panel or directly in this file.
+
+website:
+  title: Stratum3D
+
+view:
+  center: [0, 0]
+  zoom: 4
+  minZoom: 0
+  maxZoom: 20
+
+# Coordinate reference system used by the map.
+# Common values: "EPSG:4326" (WGS84), "EPSG:3031" (Antarctic), "EPSG:3413" (Arctic)
+crs: "EPSG:4326"
+
+# Show the OpenStreetMap base layer
+osm_background: true
+
+# Additional basemap tile layers (optional)
+basemaps: []
+
+# Data layers added via the Admin panel will appear here
+data_layers: []
+
+ui:
+  map_download: true
+  map_upload: true
+  viewer_download: true
+  viewer_upload: true
+  viewer_access: true
+`;
+
+try {
+  await fs.access(configFilePath);
+} catch {
+  await fs.writeFile(configFilePath, DEFAULT_CONFIG_YAML, 'utf8');
+  logger.info('No config.yaml found — created a default one at', configFilePath);
+}
+
 // Start server
 app.listen(config.port, config.host, () => {
   logger.info('================================================');
