@@ -19,7 +19,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a non-root user to run the application
-RUN groupadd -r appuser && useradd -r -g appuser -m -s /bin/false appuser
+RUN groupadd -g 1001 appuser && useradd -u 1001 -g appuser -m -s /bin/false appuser
 
 # Set working directory
 WORKDIR /app/server
