@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Backend server with preprocessing capabilities
   server:
@@ -8,7 +6,9 @@ services:
       dockerfile: Dockerfile
     container_name: stratum3D_server
     ports:
-      - "3000:3000"
+      # Bind to localhost only — access goes through Apache/nginx reverse proxy in production.
+      # For direct access without a reverse proxy, change to "3000:3000".
+      - "127.0.0.1:3000:3000"
     volumes:
       # Mount input folder for preprocessing
       - ./input:/app/input:ro
@@ -35,7 +35,9 @@ services:
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
     container_name: stratum3D_client
     ports:
-      - "8080:80"
+      # Bind to localhost only — access goes through Apache/nginx reverse proxy in production.
+      # For direct access without a reverse proxy, change to "8080:80".
+      - "127.0.0.1:8080:80"
     depends_on:
       - server
     networks:
