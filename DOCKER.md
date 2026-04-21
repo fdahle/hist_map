@@ -206,7 +206,7 @@ docker stats
 ### Using Docker Compose (VPS/Server)
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/stratum3D.git
+git clone https://github.com/fdahle/stratum3D.git
 cd stratum3D
 
 # Start services
