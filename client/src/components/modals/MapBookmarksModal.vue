@@ -82,7 +82,7 @@ defineEmits(['close']);
 
 const mapStore = useMapStore();
 
-const STORAGE_KEY = 'histmap_map_bookmarks';
+const STORAGE_KEY = 's3d_map_bookmarks';
 
 const _load = () => {
   try {

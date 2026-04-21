@@ -81,20 +81,20 @@ const buffer = await fetchWithProgress('/data/large-file.bin', (loaded, total) =
 Environment configuration helper.
 
 **Key Features:**
-- Type-safe environment variable access
-- Application configuration
-- Feature flags
+- Type-safe environment variable access (`getEnvVar`, `getEnvBool`, `getEnvNumber`)
+- Application configuration object (`appConfig`)
+- Feature flags via `appConfig.enableDebug` / `appConfig.enablePerformanceMonitoring`
 - API URL helpers
 
 **Example:**
 ```javascript
-import { appConfig, getApiUrl, isFeatureEnabled } from '@/utils/config';
+import { appConfig, getApiUrl } from '@/utils/config';
 
 console.log(appConfig.apiUrl);
 const endpoint = getApiUrl('/data/layers');
 
-if (isFeatureEnabled('experimental_ui')) {
-  // Show experimental UI
+if (appConfig.enableDebug) {
+  // Debug mode on
 }
 ```
 
@@ -124,7 +124,7 @@ const stats = getAllMetrics();
 Development utilities and debugging helpers.
 
 **Key Features:**
-- Dev mode helpers via window.__histmap__
+- Dev mode helpers via window.__stratum3D__
 - Lifecycle logging
 - Development assertions
 - Deprecation warnings
@@ -143,6 +143,90 @@ logLifecycle('MyComponent', 'mounted', { props });
 devAssert(user !== null, 'User must be logged in');
 ```
 
+### helpers.js
+Shared pure utility functions (no Vue reactivity).
+
+**Key Features:**
+- String formatting (`capitalize`, `formatKey`)
+- UUID generation via `crypto.randomUUID`
+- Function debouncing
+
+**Example:**
+```javascript
+import { capitalize, formatKey, generateUUID, debounce } from '@/utils/helpers';
+
+capitalize('hello');            // 'Hello'
+formatKey('my_field_name');     // 'My Field Name'
+const id = generateUUID();
+
+const onResize = debounce(() => recalcLayout(), 200);
+```
+
+### crs.js
+CRS/projection registration helpers for OpenLayers + proj4.
+
+**Key Features:**
+- Registers common polar/regional projections out of the box (EPSG:3031, 3575, 3995, 27700, 2154)
+- `registerCustomProjections(config)` — call once at app startup to register the map CRS from `config.yaml`
+- `tryRegisterProjection(code, proj4Def?)` — lazily register any EPSG code; falls back to epsg.io if not built-in
+
+**Example:**
+```javascript
+import { registerCustomProjections, tryRegisterProjection } from '@/utils/crs';
+
+// At startup
+const activeCrs = registerCustomProjections(appConfig);
+
+// When loading a layer whose CRS is unknown
+const ok = await tryRegisterProjection('EPSG:31255', serverProj4String);
+if (!ok) console.warn('Could not register projection');
+```
+
+### styleFactory.js
+OpenLayers style creation for vector layers and features.
+
+**Key Features:**
+- `createPinStyle(color)` — SVG map pin for point geometries
+- `createVectorStyle(strokeColor, fillColor, strokeWidth, opacity)` — lines & polygons
+- `createSelectionStyle(baseColor, geomType)` — complementary-color highlight on selection
+- `buildLayerSharedStyle(...)` — single shared `Style` for an entire layer (batched OL draw calls)
+- `applyFeatureStyle(feature, ...)` — per-feature style based on geometry type
+- `buildGroupByStyleFunction(layerId, layerStore)` — per-feature style function for `group_by` colouring
+
+**Example:**
+```javascript
+import { createVectorStyle, buildLayerSharedStyle } from '@/utils/styleFactory';
+
+const style = createVectorStyle('#e63946', null, 2, 0.3);
+vectorLayer.setStyle(style);
+
+// Shared layer style (better OL rendering performance)
+const shared = buildLayerSharedStyle(layer.color, layer.strokeColor, layer.fillColor, geomType);
+olLayer.setStyle(shared);
+```
+
+### layerFactory.js
+Factory functions that create OpenLayers layer instances from config objects.
+
+**Key Features:**
+- `createTileLayerConfig` — XYZ/WMTS tile layers with optional custom tile grids (polar projections)
+- `createWMSLayerConfig` — WMS tile layers
+- `createWMTSLayerConfig` — WMTS layers with explicit tile grids
+- `createGeoJSONLayerConfig` — deferred-load GeoJSON layer descriptors
+- `createGeoTIFFLayerConfig` — `WebGLTileLayer` for COG/GeoTIFF with colormap support
+- `buildColormapStyle(colormapId, hasNoData, inverted?)` — WebGL color expression for single-band rasters
+
+**Example:**
+```javascript
+import { createGeoTIFFLayerConfig, createGeoJSONLayerConfig } from '@/utils/layerFactory';
+
+const tiffLayer = createGeoTIFFLayerConfig(layerConf, olMap, zIndex, uuid);
+olMap.addLayer(tiffLayer.layerInstance);
+
+const jsonDescriptor = createGeoJSONLayerConfig(layerConf, uuid);
+// layerInstance is null until data is fetched and the OL layer is constructed
+```
+
 ## Usage Guidelines
 
 ### When to Use Each Utility
@@ -153,6 +237,10 @@ devAssert(user !== null, 'User must be logged in');
 - **config**: For environment-specific configuration
 - **performance**: To identify performance bottlenecks
 - **devTools**: Only in development for debugging
+- **helpers**: General-purpose string/UUID/debounce utilities
+- **crs**: Registering projections before creating map views or loading layers
+- **styleFactory**: Creating or updating OpenLayers styles for vector layers
+- **layerFactory**: Constructing OpenLayers layer instances from config descriptors
 
 ### Best Practices
 
@@ -192,14 +280,12 @@ devAssert(user !== null, 'User must be logged in');
    });
    ```
 
-5. **Check feature flags before using experimental features**
+5. **Check feature flags via appConfig**
    ```javascript
-   import { isFeatureEnabled } from '@/utils/config';
+   import { appConfig } from '@/utils/config';
    
-   if (isFeatureEnabled('new_renderer')) {
-     useNewRenderer();
-   } else {
-     useOldRenderer();
+   if (appConfig.enableDebug) {
+     showDebugOverlay();
    }
    ```
 
@@ -218,6 +304,7 @@ VITE_ENABLE_PERFORMANCE=false
 PORT=3000
 NODE_ENV=development
 LOG_LEVEL=info
+# Set to your deployed frontend URL in production:
 CORS_ORIGINS=http://localhost:8080,http://localhost:5173
 ```
 
@@ -227,14 +314,14 @@ In development mode, utilities are accessible via browser console:
 
 ```javascript
 // View performance metrics
-__histmap__.getMetrics()
+__stratum3D__.getMetrics()
 
 // Change log level
-__histmap__.setLogLevel('debug')
+__stratum3D__.setLogLevel('debug')
 
 // Get app info
-__histmap__.getInfo()
+__stratum3D__.getInfo()
 
 // Reload config
-__histmap__.reloadConfig()
+__stratum3D__.reloadConfig()
 ```

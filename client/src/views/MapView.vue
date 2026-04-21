@@ -181,7 +181,7 @@ const isBookmarksOpen = ref(false);
 // Layer panel resize
 const LP_MIN = 180, LP_MAX = 480, LP_DEFAULT = 280;
 const layerPanelWidth = ref(
-  Math.min(LP_MAX, Math.max(LP_MIN, parseInt(localStorage.getItem('histmap_layerpanel_width')) || LP_DEFAULT))
+  Math.min(LP_MAX, Math.max(LP_MIN, parseInt(localStorage.getItem('s3d_layerpanel_width')) || LP_DEFAULT))
 );
 const startLayerPanelResize = (e) => {
   e.preventDefault();
@@ -195,7 +195,7 @@ const startLayerPanelResize = (e) => {
   const onUp = () => {
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    localStorage.setItem('histmap_layerpanel_width', String(layerPanelWidth.value));
+    localStorage.setItem('s3d_layerpanel_width', String(layerPanelWidth.value));
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
   };

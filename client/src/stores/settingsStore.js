@@ -36,7 +36,12 @@ export const useSettingsStore = defineStore("settings", () => {
   const viewerEnabled = ref(true);
   const setViewerEnabled = (val) => { viewerEnabled.value = val; };
   const selectionColor = persistedRef("settings_selectionColor", "#FFFF00");
-  const theme = persistedRef("settings_theme", "dark");
+  const envTheme = import.meta.env.VITE_DEFAULT_THEME || "auto";
+  const resolvedDefault =
+    envTheme === "auto"
+      ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      : (["dark", "light"].includes(envTheme) ? envTheme : "dark");
+  const theme = persistedRef("settings_theme", resolvedDefault);
   const showArrowButtons = persistedRef("settings_showArrowButtons", false);
   const showMapRibbon = persistedRef("settings_showMapRibbon", true);
   const showBugReportButton = persistedRef("settings_showBugReportButton", true);

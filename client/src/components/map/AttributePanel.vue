@@ -190,7 +190,7 @@ const showFullImage = ref(false);
 // Attribute panel resize
 const AP_MIN = 220, AP_MAX = 520, AP_DEFAULT = 300;
 const attrPanelWidth = ref(
-  Math.min(AP_MAX, Math.max(AP_MIN, parseInt(localStorage.getItem('histmap_attrpanel_width')) || AP_DEFAULT))
+  Math.min(AP_MAX, Math.max(AP_MIN, parseInt(localStorage.getItem('s3d_attrpanel_width')) || AP_DEFAULT))
 );
 const startResize = (e) => {
   e.preventDefault();
@@ -204,7 +204,7 @@ const startResize = (e) => {
   const onUp = () => {
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    localStorage.setItem('histmap_attrpanel_width', String(attrPanelWidth.value));
+    localStorage.setItem('s3d_attrpanel_width', String(attrPanelWidth.value));
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
   };
@@ -310,7 +310,7 @@ const handle3DView = () => {
   const payload = { models: model3dUrls.value, pointclouds: pointcloudUrls.value, name };
   if (props._x) payload.x = props._x;
   if (props._y) payload.y = props._y;
-  localStorage.setItem('histmap_viewer3d', JSON.stringify(payload));
+  localStorage.setItem('s3d_viewer3d', JSON.stringify(payload));
 
   const route = router.resolve({ name: '3d-viewer' });
   window.open(route.href, '_blank');

@@ -49,7 +49,7 @@
 
         <section class="ack-section version">
           <p>Version 1.0.0</p>
-          <p class="copyright">© {{ currentYear }} Historical Map Viewer</p>
+          <p class="copyright">© {{ currentYear }} Stratum3D</p>
         </section>
       </div>
     </div>

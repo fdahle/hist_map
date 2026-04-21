@@ -14,7 +14,7 @@ class Logger {
   constructor() {
     // Enable debug logs in development, only errors/warnings in production
     this.level = import.meta.env.DEV ? LOG_LEVELS.DEBUG : LOG_LEVELS.WARN;
-    this.prefix = '[HistMap]';
+    this.prefix = '[Stratum3D]';
   }
 
   /**

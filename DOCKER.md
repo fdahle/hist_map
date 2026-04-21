@@ -1,5 +1,4 @@
-# Docker Setup for hist_map
-
+# Docker Setup for stratum3D
 Complete Docker setup with all dependencies pre-installed. Works on macOS, Ubuntu, and Windows.
 
 ## Prerequisites
@@ -120,7 +119,7 @@ docker-compose exec client sh
 The Docker setup mounts these folders:
 
 ```
-hist_map/
+stratum3D/
 ├── input/                    # Mounted read-only to server
 │   ├── shapes/
 │   ├── models/
@@ -143,15 +142,22 @@ hist_map/
 
 ## Environment Variables
 
-Create `.env` file in root directory:
+Copy `.env.example` to `.env` in the root directory and edit the two deployment-specific values:
 
 ```env
 # Server
 NODE_ENV=production
 PORT=3000
 
-# Client
-VITE_API_URL=http://localhost:3000
+# Must match the public URL used to open the app in the browser
+CORS_ORIGINS=http://your-domain.com:8080
+
+# Client — baked into the JS bundle at build time
+# Must match the public URL where the server is reachable
+VITE_API_URL=http://your-domain.com:3000
+```
+
+For local development the defaults (`localhost:8080` / `localhost:3000`) work without any changes.
 
 ## Included Tools
 
@@ -167,7 +173,7 @@ The Docker image includes:
 ### Port Already in Use
 ```bash
 # Use different ports
-docker-compose -f docker-compose.yml -p hist_map up
+docker-compose -f docker-compose.yml -p stratum3D up
 ```
 
 Or edit `docker-compose.yml` to change port mappings.
@@ -200,8 +206,8 @@ docker stats
 ### Using Docker Compose (VPS/Server)
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/hist_map.git
-cd hist_map
+git clone https://github.com/yourusername/stratum3D.git
+cd stratum3D
 
 # Start services
 docker-compose up -d
@@ -216,7 +222,7 @@ docker-compose ps
 docker swarm init
 
 # Deploy stack
-docker stack deploy -c docker-compose.yml hist_map
+docker stack deploy -c docker-compose.yml stratum3D
 
 # Check services
 docker service ls

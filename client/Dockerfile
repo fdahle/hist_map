@@ -12,6 +12,13 @@ RUN npm install
 # Copy source code
 COPY . .
 
+# Accept build-time env vars from docker-compose (baked into the JS bundle by Vite)
+ARG VITE_DEFAULT_THEME=auto
+ENV VITE_DEFAULT_THEME=$VITE_DEFAULT_THEME
+
+ARG VITE_API_URL=http://localhost:3000
+ENV VITE_API_URL=$VITE_API_URL
+
 # Build the Vue app
 RUN npm run build
 

@@ -17,6 +17,7 @@ import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHel
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { useSettingsStore } from '@/stores/settingsStore.js';
 import { storeToRefs } from 'pinia';
+import { appConfig } from '@/utils/config.js';
 
 const props = defineProps({
   modelUrls: {
@@ -249,7 +250,7 @@ const handleResize = () => {
 const loadModelFromUrl = async (url, modelIndex = 0) => {
   loadingCancelled.value = false;
   try {
-    const fullUrl = url.startsWith('http') ? url : `http://localhost:3000/${url}`;
+    const fullUrl = url.startsWith('http') ? url : `${appConfig.apiUrl}/${url}`;
     console.log(`Loading model ${modelIndex + 1}/${props.modelUrls.length}:`, fullUrl);
     
     // Fetch with progress tracking
@@ -326,7 +327,7 @@ const loadModelFromUrl = async (url, modelIndex = 0) => {
     let mtlText = null;
     if (/\.obj$/i.test(url)) {
       const mtlUrl = url.replace(/\.obj$/i, '.mtl');
-      const fullMtlUrl = mtlUrl.startsWith('http') ? mtlUrl : `http://localhost:3000/${mtlUrl}`;
+      const fullMtlUrl = mtlUrl.startsWith('http') ? mtlUrl : `${appConfig.apiUrl}/${mtlUrl}`;
       try {
         const mtlRes = await fetch(fullMtlUrl);
         if (mtlRes.ok) mtlText = await mtlRes.text();
@@ -336,7 +337,7 @@ const loadModelFromUrl = async (url, modelIndex = 0) => {
     // Parse OBJ, with materials if a co-located MTL was found
     let object;
     if (mtlText) {
-      const fullObjUrl = url.startsWith('http') ? url : `http://localhost:3000/${url}`;
+      const fullObjUrl = url.startsWith('http') ? url : `${appConfig.apiUrl}/${url}`;
       const baseUrl = fullObjUrl.substring(0, fullObjUrl.lastIndexOf('/') + 1);
       object = await loadObjWithMaterialsFromUrl(text, mtlText, baseUrl, modelIndex);
     } else {

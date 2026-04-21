@@ -56,7 +56,7 @@
       <!-- Returning user: sign in -->
       <template v-else>
         <h2 class="gate-title">Admin Access</h2>
-        <p class="gate-subtitle">Hist Map Configuration</p>
+        <p class="gate-subtitle">Stratum3D Configuration</p>
 
         <form class="gate-form" @submit.prevent="attemptLogin">
           <div class="field-group" :class="{ 'field-error': loginError }">
@@ -120,7 +120,7 @@
             <div class="field-row-2">
               <div class="field-group">
                 <label>Site Title</label>
-                <input v-model="draft.website.title" type="text" placeholder="Hist Map" />
+                <input v-model="draft.website.title" type="text" placeholder="Stratum3D" />
               </div>
               <div class="field-group">
                 <label>Favicon URL<FieldHint text="URL to the browser tab icon. Can be a relative path (e.g. /vite.svg) or an absolute HTTPS URL." /></label>
@@ -685,7 +685,7 @@ function formatBytes(b) {
 // ── Draft config ───────────────────────────────────────────────
 function blankDraft() {
   return {
-    website: { title: 'Hist Map', favicon: '/vite.svg', search: { placeholder: 'Search...', defaultQuery: '' } },
+    website: { title: 'Stratum3D Admin', favicon: '/vite.svg', search: { placeholder: 'Search...', defaultQuery: '' } },
     view: { center: [0, 0], zoom: 7, minZoom: 0, maxZoom: 28, extent: null },
     crs: 'EPSG:3857',
     projection_params: { proj_string: '', extent: null },
@@ -789,7 +789,7 @@ const osmBgLabel = computed(() => {
 // Sync the browser tab title with the configured site title while authenticated
 watch(
   () => draft.value.website.title,
-  (title) => { if (isAuthenticated.value) document.title = title || 'Hist Map'; }
+  (title) => { if (isAuthenticated.value) document.title = title || 'Stratum3D'; }
 );
 
 const yamlPanelText = computed(() => {
@@ -1023,7 +1023,7 @@ function logout() {
   password.value        = '';
   passwordConfirm.value = '';
   loginError.value      = '';
-  document.title        = 'Hist Map';
+  document.title        = 'Stratum Admin';
 }
 
 // ── Save ───────────────────────────────────────────────────────

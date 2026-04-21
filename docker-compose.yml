@@ -6,7 +6,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: hist_map_server
+    container_name: stratum3D_server
     ports:
       - "3000:3000"
     volumes:
@@ -23,25 +23,28 @@ services:
       - ADMIN_ENABLED=${ADMIN_ENABLED:-true}
     command: node index.js
     networks:
-      - hist_map_network
+      - stratum3D_network
 
   # Frontend client (production build with nginx)
   client:
     build:
       context: ./client
       dockerfile: Dockerfile
-    container_name: hist_map_client
+      args:
+        VITE_DEFAULT_THEME: ${VITE_DEFAULT_THEME:-auto}
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+    container_name: stratum3D_client
     ports:
       - "8080:80"
     depends_on:
       - server
     networks:
-      - hist_map_network
+      - stratum3D_network
 
   # Alternative: Development mode for client (hot reload)
   client-dev:
     image: node:20-alpine
-    container_name: hist_map_client_dev
+    container_name: stratum3D_client_dev
     working_dir: /app
     ports:
       - "5173:5173"
@@ -52,8 +55,8 @@ services:
     profiles:
       - dev
     networks:
-      - hist_map_network
+      - stratum3D_network
 
 networks:
-  hist_map_network:
+  stratum3D_network:
     driver: bridge

@@ -56,7 +56,7 @@ cd server && npm start      # Port 3000
 ## Project Structure
 
 ```
-hist_map/
+stratum3D/
 ├── docker-compose.yml          # Base Docker configuration
 ├── docker-compose.dev.yml      # Development overrides
 ├── docker-compose.prod.yml     # Production overrides
@@ -104,51 +104,6 @@ hist_map/
         └── wasm/               # WASM binaries (laz-perf)
 ```
 
-## Configuration
-
-### Map Configuration
-
-Edit `server/data/config.yaml` to configure your map:
-
-```yaml
-website:
-  title: My Map Viewer
-
-view:
-  center: [0, -75]
-  zoom: 3
-  minZoom: 0
-  maxZoom: 14
-
-crs: "EPSG:3031"
-
-osm_background: true
-basemaps: []
-
-data_layers:
-  - name: "My GeoJSON Layer"
-    url: "http://localhost:3000/data/layers/{uuid}/{uuid}.geojson"
-    type: geojson
-    visible: true
-    order: 0
-
-  - name: "My Raster Layer"
-    url: "http://localhost:3000/data/layers/{uuid}/{uuid}.tif"
-    type: geotiff
-    visible: true
-    order: 1
-    tiffProjection: "EPSG:3031"
-    bandCount: 1
-
-ui:
-  map_download: true
-  map_upload: true
-  viewer_download: true
-  viewer_upload: true
-```
-
-Layers are typically added and managed through the Admin interface rather than by editing this file manually.
-
 ## Workflow
 
 ### 1. Add Your Data
@@ -164,8 +119,7 @@ Each upload is assigned a unique UUID and stored under `server/data/layers/{uuid
 
 ### 2. Configure Your Map
 
-Edit `server/data/config.yaml` to set the view and CRS.
-Layers uploaded via the Admin interface are registered automatically.
+Use the Admin interface to manage layers. The map title, CRS, and view settings can be adjusted in `server/data/config.yaml` if needed.
 
 ### 3. View Your Map
 

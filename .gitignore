@@ -37,7 +37,7 @@ client/.env.local
 client/.env.production
 
 # --- Server Specific ---
-# Ignore all data files but keep the directory structure via .gitkeep files
+# Ignore all data files (config, layers, uploads) but keep directory stubs via .gitkeep
 server/data/**
 !server/data/.gitkeep
 !server/data/**/.gitkeep
@@ -57,19 +57,3 @@ server/.env.production
 .env
 .env.local
 
-# --- Large Input Files (Optional: Uncomment if files are large) ---
-# input/shapes/*.shp
-# input/shapes/*.dbf
-# input/models/*.obj
-# input/pointclouds/*.las
-# input/pointclouds/*.laz
-# input/geotiffs/*.tif
-# input/geotiffs/*.tiff
-
-# Keep processed data if small, or regenerate
-# Uncomment to ignore processed data:
-# server/data/shapes/
-# server/data/3D/
-# server/data/pointclouds/
-# server/data/geotiffs/
-/input/raster

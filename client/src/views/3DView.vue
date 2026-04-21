@@ -240,10 +240,10 @@ const currentMeasurementValue = ref(null);
 // Load viewer data from localStorage (written by AttributePanel before opening this tab)
 const _stored = (() => {
   try {
-    const raw = localStorage.getItem('histmap_viewer3d');
+    const raw = localStorage.getItem('s3d_viewer3d');
     if (raw) {
       const data = JSON.parse(raw);
-      localStorage.removeItem('histmap_viewer3d');
+      localStorage.removeItem('s3d_viewer3d');
       return data;
     }
   } catch (e) {

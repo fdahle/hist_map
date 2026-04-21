@@ -14,7 +14,7 @@ export function enableDevMode() {
   if (!import.meta.env.DEV) return;
 
   // Add debug helpers to window
-  window.__histmap__ = {
+  window.__stratum3D__ = {
     logger,
     
     // Get all performance metrics
@@ -46,7 +46,7 @@ export function enableDevMode() {
     },
   };
 
-  logger.info('DevTools', 'Development mode enabled. Access debug tools via window.__histmap__');
+  logger.info('DevTools', 'Development mode enabled. Access debug tools via window.__stratum3D__');
 }
 
 /**
