@@ -49,26 +49,9 @@ const mapStore = useMapStore();
 const layerManager = inject("layerManager");
 const appConfig = inject("config");
 
-// Placeholder text from config or default from strings
-const placeholderText = computed(() => {
-  try {
-    return appConfig?.value?.website?.search?.placeholder || STRINGS.search.placeholder;
-  } catch (e) {
-    return STRINGS.search.placeholder;
-  }
-});
+const placeholderText = computed(() => STRINGS.search.placeholder);
 
 const query = ref("");
-
-// Initialize query from config when available
-onMounted(() => {
-  if (appConfig?.value?.website?.search?.defaultQuery) {
-    query.value = appConfig.value.website.search.defaultQuery;
-    if (query.value.length >= SEARCH_MIN_LENGTH) {
-      performSearch();
-    }
-  }
-});
 const results = ref([]);
 const isFocused = ref(false);
 const activeIndex = ref(-1);
@@ -190,8 +173,18 @@ const clearSearch = () => {
   left: 50%;
   transform: translateX(-50%);
   width: 350px;
-  z-index: 3000; /* Ensure it is above map controls */
+  z-index: 3000;
   font-family: 'Segoe UI', sans-serif;
+}
+
+@media (max-width: 768px) {
+  .search-wrapper {
+    left: 68px;
+    right: 12px;
+    width: auto;
+    transform: none;
+    top: 15px;
+  }
 }
 
 .search-box {

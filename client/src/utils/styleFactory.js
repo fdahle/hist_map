@@ -1,8 +1,8 @@
 // Style factory for consistent OpenLayers styling
-import { Style, Stroke, Fill, Icon } from "ol/style";
-import { 
-  DEFAULT_COLOR, 
-  DEFAULT_STROKE_WIDTH, 
+import { Style, Stroke, Fill, Icon, Circle as CircleStyle, RegularShape } from "ol/style";
+import {
+  DEFAULT_COLOR,
+  DEFAULT_STROKE_WIDTH,
   DEFAULT_SELECTION_WIDTH,
   DEFAULT_OPACITY,
   DEFAULT_SELECTION_OPACITY,
@@ -10,7 +10,7 @@ import {
   GEOMETRY_TYPE
 } from "../constants/layerConstants";
 
-import { getMapPinIcon } from "../constants/icons";
+import { getMapPinIcon, getCameraMapIcon, getCrosshairMapIcon } from "../constants/icons";
 
 /**
  * Create a pin/marker style from an SVG
@@ -26,6 +26,72 @@ export function createPinStyle(color = DEFAULT_COLOR) {
       anchor: [0.5, 1], // Bottom center
       src: `data:image/svg+xml;charset=utf-8,${encodedSvg}`,
       scale: 1,
+    }),
+  });
+}
+
+/**
+ * Create a camera marker style (for camera position layers)
+ * @param {string} color - Hex color for the camera body
+ * @returns {Style} OpenLayers Style object
+ */
+export function createCameraStyle(color = DEFAULT_COLOR) {
+  const svg = getCameraMapIcon(color);
+  const encodedSvg = encodeURIComponent(svg);
+  return new Style({
+    image: new Icon({
+      anchor: [0.5, 0.5],
+      src: `data:image/svg+xml;charset=utf-8,${encodedSvg}`,
+      scale: 1,
+    }),
+  });
+}
+
+/**
+ * Create a crosshair marker style (for GCP / survey control point layers)
+ * @param {string} color - Hex color
+ * @returns {Style} OpenLayers Style object
+ */
+export function createCrosshairStyle(color = DEFAULT_COLOR) {
+  const svg = getCrosshairMapIcon(color);
+  const encodedSvg = encodeURIComponent(svg);
+  return new Style({
+    image: new Icon({
+      anchor: [0.5, 0.5],
+      src: `data:image/svg+xml;charset=utf-8,${encodedSvg}`,
+      scale: 1,
+    }),
+  });
+}
+
+/**
+ * Create a circle dot marker style
+ * @param {string} color - Hex color
+ * @returns {Style} OpenLayers Style object
+ */
+export function createCircleStyle(color = DEFAULT_COLOR) {
+  return new Style({
+    image: new CircleStyle({
+      radius: 6,
+      fill: new Fill({ color }),
+      stroke: new Stroke({ color: 'white', width: 1.5 }),
+    }),
+  });
+}
+
+/**
+ * Create a square marker style
+ * @param {string} color - Hex color
+ * @returns {Style} OpenLayers Style object
+ */
+export function createSquareStyle(color = DEFAULT_COLOR) {
+  return new Style({
+    image: new RegularShape({
+      points: 4,
+      radius: 6,
+      angle: Math.PI / 4,
+      fill: new Fill({ color }),
+      stroke: new Stroke({ color: 'white', width: 1.5 }),
     }),
   });
 }
@@ -101,13 +167,18 @@ export function createSelectionStyle(baseColor = DEFAULT_COLOR, geomType = '') {
  * @param {string|null} strokeColor - 'none' | hex | null (falls back to baseColor)
  * @param {string|null} fillColor   - 'none' | hex | null (derives from strokeColor)
  * @param {string} geomType    - GEOMETRY_TYPE value from the first feature
+ * @param {string|null} [pointType] - 'camera' | 'crosshair' | 'circle' | 'square' | null (pin)
  * @returns {Style}
  */
-export function buildLayerSharedStyle(baseColor, strokeColor, fillColor, geomType) {
+export function buildLayerSharedStyle(baseColor, strokeColor, fillColor, geomType, pointType = null) {
   const effectiveStroke = strokeColor || baseColor || DEFAULT_COLOR;
   if (geomType === GEOMETRY_TYPE.POINT || geomType === GEOMETRY_TYPE.MULTI_POINT) {
-    const pinColor = effectiveStroke !== 'none' ? effectiveStroke : DEFAULT_COLOR;
-    return createPinStyle(pinColor);
+    const color = effectiveStroke !== 'none' ? effectiveStroke : DEFAULT_COLOR;
+    if (pointType === 'camera')    return createCameraStyle(color);
+    if (pointType === 'crosshair') return createCrosshairStyle(color);
+    if (pointType === 'circle')    return createCircleStyle(color);
+    if (pointType === 'square')    return createSquareStyle(color);
+    return createPinStyle(color);
   }
   return createVectorStyle(effectiveStroke, fillColor);
 }
@@ -118,14 +189,19 @@ export function buildLayerSharedStyle(baseColor, strokeColor, fillColor, geomTyp
  * @param {string} color - Base/fallback hex color
  * @param {string|null} strokeColor - Override stroke color, or 'none' to disable stroke
  * @param {string|null} fillColor - Override fill color, 'none' to disable fill, or null to derive
+ * @param {string|null} [pointType] - 'camera' | 'crosshair' | 'circle' | 'square' | null (pin)
  */
-export function applyFeatureStyle(feature, color = DEFAULT_COLOR, strokeColor = null, fillColor = null) {
+export function applyFeatureStyle(feature, color = DEFAULT_COLOR, strokeColor = null, fillColor = null, pointType = null) {
   const geomType = feature.getGeometry().getType();
   const effectiveStroke = strokeColor || color;
 
   if (geomType === GEOMETRY_TYPE.POINT || geomType === GEOMETRY_TYPE.MULTI_POINT) {
-    const pinColor = (effectiveStroke !== 'none') ? effectiveStroke : DEFAULT_COLOR;
-    feature.setStyle(createPinStyle(pinColor));
+    const c = (effectiveStroke !== 'none') ? effectiveStroke : DEFAULT_COLOR;
+    if (pointType === 'camera')    { feature.setStyle(createCameraStyle(c)); return; }
+    if (pointType === 'crosshair') { feature.setStyle(createCrosshairStyle(c)); return; }
+    if (pointType === 'circle')    { feature.setStyle(createCircleStyle(c)); return; }
+    if (pointType === 'square')    { feature.setStyle(createSquareStyle(c)); return; }
+    feature.setStyle(createPinStyle(c));
   } else {
     feature.setStyle(createVectorStyle(effectiveStroke, fillColor));
   }

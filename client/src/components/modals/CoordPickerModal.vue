@@ -25,21 +25,21 @@
         <div class="coord-row">
           <span class="axis x">X</span>
           <span class="coord-value">{{ pickedCoord.x.toFixed(4) }}</span>
-          <button class="copy-btn" title="Copy X" @click="copyValue(pickedCoord.x.toFixed(4))">
+          <button class="copy-btn" title="Copy X" @click="copyToClipboard(pickedCoord.x.toFixed(4))">
             <span v-html="ICON_COPY" />
           </button>
         </div>
         <div class="coord-row">
           <span class="axis y">Y</span>
           <span class="coord-value">{{ pickedCoord.y.toFixed(4) }}</span>
-          <button class="copy-btn" title="Copy Y" @click="copyValue(pickedCoord.y.toFixed(4))">
+          <button class="copy-btn" title="Copy Y" @click="copyToClipboard(pickedCoord.y.toFixed(4))">
             <span v-html="ICON_COPY" />
           </button>
         </div>
         <div class="coord-row">
           <span class="axis z">Z</span>
           <span class="coord-value">{{ pickedCoord.z.toFixed(4) }}</span>
-          <button class="copy-btn" title="Copy Z" @click="copyValue(pickedCoord.z.toFixed(4))">
+          <button class="copy-btn" title="Copy Z" @click="copyToClipboard(pickedCoord.z.toFixed(4))">
             <span v-html="ICON_COPY" />
           </button>
         </div>
@@ -56,11 +56,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue';
+import { ref } from 'vue';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { storeToRefs } from 'pinia';
-import { ICON_CLOSE } from '@/constants/icons';
-import { ICON_PICK_XYZ } from '@/constants/icons';
+import { ICON_CLOSE, ICON_PICK_XYZ } from '@/constants/icons';
+import { copyToClipboard } from '@/utils/clipboard';
+import { useModalDrag } from '@/composables/useModalDrag';
 
 const ICON_COPY = `<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 
@@ -74,52 +75,13 @@ const viewer3DStore = useViewer3DStore();
 const { pickedCoord } = storeToRefs(viewer3DStore);
 
 const modalRef = ref(null);
-const isDragging = ref(false);
-const dragOffset = ref({ x: 0, y: 0 });
-const position = ref({ x: window.innerWidth - 330, y: 80 });
+const { modalStyle, startDrag } = useModalDrag(modalRef, { initialX: window.innerWidth - 330, initialY: 80 });
 
-const modalStyle = computed(() => ({
-  left: `${position.value.x}px`,
-  top: `${position.value.y}px`,
-}));
-
-const copyValue = (val) => { navigator.clipboard?.writeText(String(val)).catch(() => {}); };
 const copyAll = () => {
   if (!pickedCoord.value) return;
   const { x, y, z } = pickedCoord.value;
-  copyValue(`${x.toFixed(4)}, ${y.toFixed(4)}, ${z.toFixed(4)}`);
+  copyToClipboard(`${x.toFixed(4)}, ${y.toFixed(4)}, ${z.toFixed(4)}`);
 };
-
-const startDrag = (e) => {
-  if (!e.target.closest('.modal-header')) return;
-  if (e.target.closest('.close-btn')) return;
-  isDragging.value = true;
-  dragOffset.value = { x: e.clientX - position.value.x, y: e.clientY - position.value.y };
-  document.addEventListener('mousemove', onDrag);
-  document.addEventListener('mouseup', stopDrag);
-  e.preventDefault();
-};
-
-const onDrag = (e) => {
-  if (!isDragging.value) return;
-  const w = modalRef.value?.offsetWidth || 280;
-  const h = modalRef.value?.offsetHeight || 260;
-  position.value = {
-    x: Math.max(0, Math.min(e.clientX - dragOffset.value.x, window.innerWidth - w)),
-    y: Math.max(0, Math.min(e.clientY - dragOffset.value.y, window.innerHeight - h)),
-  };
-};
-
-const stopDrag = () => {
-  isDragging.value = false;
-  document.removeEventListener('mousemove', onDrag);
-  document.removeEventListener('mouseup', stopDrag);
-};
-
-onUnmounted(() => {
-  document.removeEventListener('mousemove', onDrag);
-  document.removeEventListener('mouseup', stopDrag);
-});
 </script>
 
 <style scoped>

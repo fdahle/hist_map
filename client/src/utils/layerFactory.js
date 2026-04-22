@@ -227,7 +227,9 @@ export function createGeoJSONLayerConfig(layerConf, layerId) {
     url: layerConf.url,
     searchFields: layerConf.search_fields || [],
     metadata: layerConf._metadata || {},
+    sourceCrs: layerConf.sourceCrs ?? null,
     groupBy: layerConf.group_by ?? null,
+    pointType: layerConf.pointType ?? null,
     thumbnailUrl: layerConf.thumbnail_url ?? null,
   };
 }

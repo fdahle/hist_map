@@ -2,6 +2,7 @@
 // Provides devtools integration and consistency with the map stores.
 import { defineStore } from 'pinia';
 import { ref, shallowRef, markRaw } from 'vue';
+import { loadFromStorage, saveToStorage } from '../../utils/localStorage';
 
 export const useViewer3DStore = defineStore('viewer3d', () => {
   // Shared Three.js objects (use shallowRef to avoid deep reactivity on Three.js objects)
@@ -42,11 +43,7 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
 
   // Scene bookmarks – persisted to localStorage
   const _BOOKMARK_KEY = 'viewer3d_bookmarks';
-  const bookmarks = ref([]);
-  try {
-    const _stored = localStorage.getItem(_BOOKMARK_KEY);
-    if (_stored) bookmarks.value = JSON.parse(_stored);
-  } catch { /* ignore */ }
+  const bookmarks = ref(loadFromStorage(_BOOKMARK_KEY, []));
 
   const addBookmark = (name, position, target) => {
     bookmarks.value.push({
@@ -54,12 +51,12 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
       position: { x: position.x, y: position.y, z: position.z },
       target:   { x: target.x,   y: target.y,   z: target.z   },
     });
-    try { localStorage.setItem(_BOOKMARK_KEY, JSON.stringify(bookmarks.value)); } catch { /* ignore */ }
+    saveToStorage(_BOOKMARK_KEY, bookmarks.value);
   };
 
   const removeBookmark = (index) => {
     bookmarks.value.splice(index, 1);
-    try { localStorage.setItem(_BOOKMARK_KEY, JSON.stringify(bookmarks.value)); } catch { /* ignore */ }
+    saveToStorage(_BOOKMARK_KEY, bookmarks.value);
   };
 
   // Scene management

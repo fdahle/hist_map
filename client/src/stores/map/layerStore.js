@@ -51,7 +51,9 @@ export const useLayerStore = defineStore("layers", () => {
     metadata = {},
     isUserAdded = false,
     groupBy = null,
+    pointType = null,
     attribution = null,
+    sourceCrs = null,
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
@@ -98,6 +100,7 @@ export const useLayerStore = defineStore("layers", () => {
       isUserAdded,
       // sub-category grouping: attribute name to split features by
       groupBy,
+      pointType,
       // populated after load: { value: { color: '#hex', visible: true } }
       subCategories: {},
       // true when groupBy field was not found in any loaded feature
@@ -106,6 +109,7 @@ export const useLayerStore = defineStore("layers", () => {
       warning: null,
       // attribution text for base tile/WMS/WMTS layers (HTML allowed)
       attribution,
+      sourceCrs,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.

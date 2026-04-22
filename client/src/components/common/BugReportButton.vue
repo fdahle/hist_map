@@ -51,7 +51,14 @@ const { showBugReportButton } = storeToRefs(useSettingsStore());
   display: block;
 }
 
-
+@media (max-width: 768px) {
+  .bug-report-btn {
+    top: auto;
+    bottom: 80px;
+    left: auto;
+    right: 12px;
+  }
+}
 
 /* Light theme */
 .theme-light .bug-report-btn {

@@ -213,6 +213,7 @@
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue';
+import { useModalDrag } from '@/composables/useModalDrag';
 import { storeToRefs } from 'pinia';
 import { useLayerStore } from '@/stores/map/layerStore';
 import { ICON_CLOSE } from '@/constants/icons';
@@ -387,40 +388,7 @@ function fmtDist(m) {
 
 // ── Dragging ─────────────────────────────────────────────────────────────────
 const modalRef = ref(null);
-const isDragging = ref(false);
-const dragOffset = ref({ x: 0, y: 0 });
-const position = ref({ x: window.innerWidth - 340, y: 80 });
-
-const modalStyle = computed(() => ({
-  left: `${position.value.x}px`,
-  top:  `${position.value.y}px`,
-}));
-
-const startDrag = (e) => {
-  if (!e.target.closest('.modal-header')) return;
-  if (e.target.closest('.header-btn')) return;
-  isDragging.value = true;
-  dragOffset.value = { x: e.clientX - position.value.x, y: e.clientY - position.value.y };
-  document.addEventListener('mousemove', onDrag);
-  document.addEventListener('mouseup', stopDrag);
-  e.preventDefault();
-};
-const onDrag = (e) => {
-  if (!isDragging.value) return;
-  position.value = {
-    x: Math.max(0, Math.min(e.clientX - dragOffset.value.x, window.innerWidth - 320)),
-    y: Math.max(0, Math.min(e.clientY - dragOffset.value.y, window.innerHeight - 100)),
-  };
-};
-const stopDrag = () => {
-  isDragging.value = false;
-  document.removeEventListener('mousemove', onDrag);
-  document.removeEventListener('mouseup', stopDrag);
-};
-onUnmounted(() => {
-  document.removeEventListener('mousemove', onDrag);
-  document.removeEventListener('mouseup', stopDrag);
-});
+const { modalStyle, startDrag } = useModalDrag(modalRef, { initialX: window.innerWidth - 340, initialY: 80 });
 
 // ── Chart hover ──────────────────────────────────────────────────────────────
 const hoverInfo = ref(null);

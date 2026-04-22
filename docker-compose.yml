@@ -33,6 +33,9 @@ services:
       args:
         VITE_DEFAULT_THEME: ${VITE_DEFAULT_THEME:-auto}
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+        VITE_SITE_TITLE: ${VITE_SITE_TITLE:-Stratum3D}
+        VITE_SITE_FAVICON: ${VITE_SITE_FAVICON:-/vite.svg}
+        VITE_BUG_REPORT: ${VITE_BUG_REPORT:-auto}
     container_name: stratum3D_client
     ports:
       # Bind to localhost only — access goes through Apache/nginx reverse proxy in production.

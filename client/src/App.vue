@@ -70,12 +70,26 @@ onMounted(async () => {
     enableDevMode();
   }
 
+  // Apply title and favicon from build-time env vars
+  const siteTitle = import.meta.env.VITE_SITE_TITLE;
+  const siteFavicon = import.meta.env.VITE_SITE_FAVICON;
+  if (siteTitle) applyRouteTitle(siteTitle);
+  if (siteFavicon) {
+    let link = document.querySelector("link[rel~='icon']");
+    if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+    link.href = siteFavicon;
+  }
+
   // Fetch admin status first so the router guard and UI are ready before config loads
   try {
     const statusRes = await fetch(getApiUrl('/admin/setup-status'));
     if (statusRes.ok) {
       const s = await statusRes.json();
       settingsStore.setAdminEnabled(s.adminEnabled !== false);
+      if (s.adminEnabled !== false && !s.hasPassword && !route.path.startsWith('/admin')) {
+        window.location.replace('/admin');
+        return;
+      }
     }
   } catch { /* server unreachable — leave adminEnabled as true (safe default) */ }
 
@@ -106,27 +120,6 @@ onMounted(async () => {
 
     appConfig.value = parsed;
     isConfigLoaded.value = true;
-    
-    // Apply website settings (title and favicon) if provided
-    try {
-      const site = parsed.website || {};
-      if (site.title) {
-        applyRouteTitle(site.title);
-      }
-
-      if (site.favicon) {
-        // Update existing <link rel="icon"> or create one
-        let link = document.querySelector("link[rel~='icon']");
-        if (!link) {
-          link = document.createElement('link');
-          link.rel = 'icon';
-          document.getElementsByTagName('head')[0].appendChild(link);
-        }
-        link.href = site.favicon;
-      }
-    } catch (e) {
-      logger.warn('App', 'Failed to apply website settings:', e);
-    }
   } catch (e) {
     logger.error('App', 'Failed to load config:', e);
     configError.value = e.message;

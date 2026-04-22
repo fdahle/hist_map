@@ -110,37 +110,7 @@
       <div v-if="loadError" class="banner banner-error">{{ loadError }}</div>
 
       <div class="editor-grid">
-        <!-- ── 1. Website ─────────────────────────────────────── -->
-        <section class="admin-section">
-          <div class="section-header-simple">
-            <h2 class="section-title">Website</h2>
-            <p class="section-desc">Page title, favicon and search bar defaults.</p>
-          </div>
-          <div class="fields-stack">
-            <div class="field-row-2">
-              <div class="field-group">
-                <label>Site Title</label>
-                <input v-model="draft.website.title" type="text" placeholder="Stratum3D" />
-              </div>
-              <div class="field-group">
-                <label>Favicon URL<FieldHint text="URL to the browser tab icon. Can be a relative path (e.g. /vite.svg) or an absolute HTTPS URL." /></label>
-                <input v-model="draft.website.favicon" type="text" placeholder="/vite.svg" />
-              </div>
-            </div>
-            <div class="field-row-2">
-              <div class="field-group">
-                <label>Search Placeholder</label>
-                <input v-model="draft.website.search.placeholder" type="text" placeholder="Search..." />
-              </div>
-              <div class="field-group">
-                <label>Search Default Query<FieldHint text="Pre-fills the search bar when the map loads. Leave blank for an empty search bar." /></label>
-                <input v-model="draft.website.search.defaultQuery" type="text" placeholder="" />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ── 2. Map View ────────────────────────────────────── -->
+        <!-- ── 1. Map View ────────────────────────────────────── -->
         <section class="admin-section">
           <div class="section-header-simple">
             <h2 class="section-title">Map View</h2>
@@ -685,7 +655,6 @@ function formatBytes(b) {
 // ── Draft config ───────────────────────────────────────────────
 function blankDraft() {
   return {
-    website: { title: 'Stratum3D Admin', favicon: '/vite.svg', search: { placeholder: 'Search...', defaultQuery: '' } },
     view: { center: [0, 0], zoom: 7, minZoom: 0, maxZoom: 28, extent: null },
     crs: 'EPSG:3857',
     projection_params: { proj_string: '', extent: null },
@@ -786,11 +755,6 @@ const osmBgLabel = computed(() => {
   return 'OpenStreetMap (standard tiles)';
 });
 
-// Sync the browser tab title with the configured site title while authenticated
-watch(
-  () => draft.value.website.title,
-  (title) => { if (isAuthenticated.value) document.title = title || 'Stratum3D'; }
-);
 
 const yamlPanelText = computed(() => {
   try { return yaml.dump(buildConfig(), { lineWidth: 120, noRefs: true }); }
@@ -853,14 +817,6 @@ function parseProjExtent() {
 
 function loadConfigIntoDraft(config) {
   const d = blankDraft();
-  if (config.website) {
-    d.website.title   = config.website.title   ?? d.website.title;
-    d.website.favicon = config.website.favicon ?? d.website.favicon;
-    if (config.website.search) {
-      d.website.search.placeholder  = config.website.search.placeholder  ?? d.website.search.placeholder;
-      d.website.search.defaultQuery = config.website.search.defaultQuery ?? d.website.search.defaultQuery;
-    }
-  }
   if (config.view) {
     d.view.center  = config.view.center  ?? d.view.center;
     d.view.zoom    = config.view.zoom    ?? d.view.zoom;
@@ -894,10 +850,6 @@ function loadConfigIntoDraft(config) {
 function buildConfig() {
   const d = draft.value;
   const out = {};
-  out.website = {
-    title: d.website.title, favicon: d.website.favicon,
-    search: { placeholder: d.website.search.placeholder, defaultQuery: d.website.search.defaultQuery },
-  };
   out.view = { center: d.view.center, zoom: d.view.zoom };
   if (d.view.extent)                  out.view.extent   = d.view.extent;
   if (d.view.minZoom !== undefined)   out.view.minZoom  = d.view.minZoom;

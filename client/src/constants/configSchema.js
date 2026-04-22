@@ -3,22 +3,6 @@
 // Covers every section that config.yaml supports.
 
 export const CONFIG_SCHEMA = {
-  // Website metadata (optional)
-  website: {
-    required: false,
-    fields: {
-      title: { type: "string", default: "MapViewer" },
-      favicon: { type: "string", default: "/vite.svg" },
-      search: {
-        required: false,
-        fields: {
-          placeholder: { type: "string", default: "Search..." },
-          defaultQuery: { type: "string", default: "" },
-        },
-      },
-    },
-  },
-
   // Map view settings
   view: {
     required: ["center", "zoom"],

@@ -313,6 +313,16 @@
                   <input v-model="editDraft.fill_color" type="text" placeholder="none" />
                 </div>
               </div>
+              <div class="edit-field">
+                <label>Point type</label>
+                <select v-model="editDraft.pointType">
+                  <option value="">— auto (pin) —</option>
+                  <option value="circle">circle</option>
+                  <option value="square">square</option>
+                  <option value="camera">camera (SfM positions)</option>
+                  <option value="crosshair">crosshair (GCPs)</option>
+                </select>
+              </div>
             </div>
           </template>
 
@@ -594,6 +604,7 @@ function applyPatchToLayerConfig(lc, patch) {
   if ('stroke_color'   in patch) lc.stroke_color   = patch.stroke_color;
   if ('fill_color'     in patch) lc.fill_color     = patch.fill_color;
   if ('thumbnail_url'  in patch) lc.thumbnail_url  = patch.thumbnail_url || null;
+  if ('pointType'      in patch) lc.pointType      = patch.pointType || null;
   if ('attribution'    in patch) lc.attribution    = patch.attribution;
   if ('search_fields'  in patch) lc.search_fields  = patch.search_fields;
   if ('opacity'        in patch) lc.opacity        = patch.opacity;
@@ -702,6 +713,7 @@ function metaToEntry(meta) {
   for (const k of extras) {
     if (lc[k] != null) entry[k] = lc[k];
   }
+  if (meta.fileType === 'geojson' && lc.sourceCrs) entry.sourceCrs = lc.sourceCrs;
   // GeoTIFF-specific metadata: source projection, band count, data range, nodata.
   // tiffProjection falls back to cogOptions.sourceCrs (set during upload) so that
   // the client can set up correct reprojection even when not explicitly overridden.
@@ -739,6 +751,7 @@ function emitLayers() {
           fill_color:   d.fill_color   || lc.fill_color,
           attribution:  d.attribution  || lc.attribution,
           thumbnail_url: d.thumbnail_url !== undefined ? (d.thumbnail_url || null) : lc.thumbnail_url,
+          pointType:     d.pointType !== undefined ? (d.pointType || null) : lc.pointType,
           search_fields: searchFieldsStr.value
             .split(',').map(s => s.trim()).filter(Boolean),
         },
@@ -1016,6 +1029,7 @@ function toggleEdit(layer) {
     color:        lc.color        ?? '',
     stroke_color: lc.stroke_color ?? '',
     fill_color:   lc.fill_color   ?? '',
+    pointType:    lc.pointType    ?? '',
     thumbnail_url: lc.thumbnail_url ?? '',
     // GeoTIFF extras
     opacity:      lc.opacity      ?? null,
@@ -1099,6 +1113,7 @@ function saveEdit(id, { closePanel = false } = {}) {
   );
   patch.search_fields = parsedSearchFields;
   patch.thumbnail_url = editDraft.value.thumbnail_url ?? '';
+  patch.pointType = editDraft.value.pointType || null;
   const layer = layers.value.find(l => l.id === id);
   const crsVal = editDraft.value.crsOverride?.trim() || null;
   if (layer?.fileType === 'geotiff') {

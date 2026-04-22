@@ -70,11 +70,11 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue';
+import { ref } from 'vue';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { storeToRefs } from 'pinia';
-import { ICON_CLOSE, ICON_TRASH } from '@/constants/icons';
-import { ICON_BOOKMARK_ADD } from '@/constants/icons';
+import { ICON_CLOSE, ICON_TRASH, ICON_BOOKMARK_ADD } from '@/constants/icons';
+import { useModalDrag } from '@/composables/useModalDrag';
 
 defineProps({
   isVisible: { type: Boolean, default: false },
@@ -95,47 +95,8 @@ const saveView = () => {
   newName.value = '';
 };
 
-// --- drag ---
 const modalRef = ref(null);
-const isDragging = ref(false);
-const dragOffset = ref({ x: 0, y: 0 });
-const position = ref({ x: window.innerWidth - 330, y: 160 });
-
-const modalStyle = computed(() => ({
-  left: `${position.value.x}px`,
-  top: `${position.value.y}px`,
-}));
-
-const startDrag = (e) => {
-  if (!e.target.closest('.modal-header')) return;
-  if (e.target.closest('.close-btn')) return;
-  isDragging.value = true;
-  dragOffset.value = { x: e.clientX - position.value.x, y: e.clientY - position.value.y };
-  document.addEventListener('mousemove', onDrag);
-  document.addEventListener('mouseup', stopDrag);
-  e.preventDefault();
-};
-
-const onDrag = (e) => {
-  if (!isDragging.value) return;
-  const w = modalRef.value?.offsetWidth || 300;
-  const h = modalRef.value?.offsetHeight || 300;
-  position.value = {
-    x: Math.max(0, Math.min(e.clientX - dragOffset.value.x, window.innerWidth - w)),
-    y: Math.max(0, Math.min(e.clientY - dragOffset.value.y, window.innerHeight - h)),
-  };
-};
-
-const stopDrag = () => {
-  isDragging.value = false;
-  document.removeEventListener('mousemove', onDrag);
-  document.removeEventListener('mouseup', stopDrag);
-};
-
-onUnmounted(() => {
-  document.removeEventListener('mousemove', onDrag);
-  document.removeEventListener('mouseup', stopDrag);
-});
+const { modalStyle, startDrag } = useModalDrag(modalRef, { initialX: window.innerWidth - 330, initialY: 160 });
 </script>
 
 <style scoped>

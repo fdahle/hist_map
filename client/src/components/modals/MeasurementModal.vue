@@ -107,6 +107,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { useModalDrag } from '@/composables/useModalDrag';
 import { ICON_DISTANCE, ICON_AREA, ICON_CLOSE, ICON_TRASH } from '@/constants/icons';
 
 const props = defineProps({
@@ -135,9 +136,7 @@ const props = defineProps({
 defineEmits(['close', 'reset', 'remove-measurement', 'save-current', 'undo-point', 'cancel-measurement']);
 
 const modalRef = ref(null);
-const isDragging = ref(false);
-const dragOffset = ref({ x: 0, y: 0 });
-const position = ref({ x: window.innerWidth - 320, y: 80 }); // Top right by default
+const { modalStyle, startDrag } = useModalDrag(modalRef, { initialX: window.innerWidth - 320, initialY: 80 });
 
 const minPoints = computed(() => {
   return props.measurementType === 'distance' ? 2 : 3;
@@ -165,11 +164,6 @@ const requiredPointsDisplay = computed(() => {
   return props.measurementType === 'distance' ? ` / ${requiredPoints.value}` : '';
 });
 
-const modalStyle = computed(() => ({
-  left: `${position.value.x}px`,
-  top: `${position.value.y}px`
-}));
-
 const getTypeLabel = (type) => {
   switch (type) {
     case 'distance': return 'Distance';
@@ -178,56 +172,6 @@ const getTypeLabel = (type) => {
   }
 };
 
-// Dragging functionality
-const startDrag = (e) => {
-  // Only start drag if clicking on the header (title area)
-  if (!e.target.closest('.modal-header')) {
-    return;
-  }
-  
-  // Don't drag if clicking the close button
-  if (e.target.classList.contains('close-btn') || 
-      e.target.closest('.close-btn')) {
-    return;
-  }
-
-  isDragging.value = true;
-  dragOffset.value = {
-    x: e.clientX - position.value.x,
-    y: e.clientY - position.value.y
-  };
-  
-  document.addEventListener('mousemove', onDrag);
-  document.addEventListener('mouseup', stopDrag);
-  e.preventDefault();
-};
-
-const onDrag = (e) => {
-  if (!isDragging.value) return;
-  
-  const newX = e.clientX - dragOffset.value.x;
-  const newY = e.clientY - dragOffset.value.y;
-  
-  // Keep modal within viewport bounds
-  const modalWidth = 300;
-  const modalHeight = modalRef.value?.offsetHeight || 400;
-  
-  position.value = {
-    x: Math.max(0, Math.min(newX, window.innerWidth - modalWidth)),
-    y: Math.max(0, Math.min(newY, window.innerHeight - modalHeight))
-  };
-};
-
-const stopDrag = () => {
-  isDragging.value = false;
-  document.removeEventListener('mousemove', onDrag);
-  document.removeEventListener('mouseup', stopDrag);
-};
-
-onUnmounted(() => {
-  document.removeEventListener('mousemove', onDrag);
-  document.removeEventListener('mouseup', stopDrag);
-});
 </script>
 
 <style scoped>

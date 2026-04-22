@@ -1,30 +1,10 @@
 import { defineStore } from "pinia";
-import { ref, watch } from "vue";
-
-/**
- * Create a persisted ref that auto-syncs with localStorage
- * @param {string} key - localStorage key
- * @param {any} defaultValue - Default value if nothing stored
- * @returns {import('vue').Ref} Reactive ref that persists to localStorage
- */
-function persistedRef(key, defaultValue) {
-  const stored = localStorage.getItem(key);
-  let initial = defaultValue;
-  if (stored !== null) {
-    try {
-      initial = JSON.parse(stored);
-    } catch {
-      initial = stored;
-    }
-  }
-  const state = ref(initial);
-  watch(state, (val) => localStorage.setItem(key, JSON.stringify(val)));
-  return state;
-}
+import { ref, computed } from "vue";
+import { createPersistedRef } from "../utils/localStorage";
 
 export const useSettingsStore = defineStore("settings", () => {
   // 1. STATE (auto-persisted to localStorage)
-  const showInfoBar = persistedRef("settings_showInfoBar", true);
+  const showInfoBar = createPersistedRef("settings_showInfoBar", true);
 
   // Runtime flag — fetched from /admin/setup-status on app start.
   // true until the server explicitly says otherwise.
@@ -35,16 +15,22 @@ export const useSettingsStore = defineStore("settings", () => {
   // true until the server explicitly says otherwise.
   const viewerEnabled = ref(true);
   const setViewerEnabled = (val) => { viewerEnabled.value = val; };
-  const selectionColor = persistedRef("settings_selectionColor", "#FFFF00");
+  const selectionColor = createPersistedRef("settings_selectionColor", "#FFFF00");
   const envTheme = import.meta.env.VITE_DEFAULT_THEME || "auto";
   const resolvedDefault =
     envTheme === "auto"
       ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
       : (["dark", "light"].includes(envTheme) ? envTheme : "dark");
-  const theme = persistedRef("settings_theme", resolvedDefault);
-  const showArrowButtons = persistedRef("settings_showArrowButtons", false);
-  const showMapRibbon = persistedRef("settings_showMapRibbon", true);
-  const showBugReportButton = persistedRef("settings_showBugReportButton", true);
+  const theme = createPersistedRef("settings_theme", resolvedDefault);
+  const showArrowButtons = createPersistedRef("settings_showArrowButtons", false);
+  const showMapRibbon = createPersistedRef("settings_showMapRibbon", true);
+  const bugReportMode = import.meta.env.VITE_BUG_REPORT || 'auto';
+  const _bugReportUserPref = createPersistedRef("settings_showBugReportButton", true);
+  const showBugReportButton = computed(() => {
+    if (bugReportMode === 'yes') return true;
+    if (bugReportMode === 'no') return false;
+    return _bugReportUserPref.value;
+  });
 
   // 2. ACTIONS
   const toggleInfoBar = () => { showInfoBar.value = !showInfoBar.value; };
@@ -53,7 +39,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const setTheme = (newTheme) => { theme.value = newTheme; };
   const toggleArrowButtons = () => { showArrowButtons.value = !showArrowButtons.value; };
   const toggleMapRibbon = () => { showMapRibbon.value = !showMapRibbon.value; };
-  const toggleBugReportButton = () => { showBugReportButton.value = !showBugReportButton.value; };
+  const toggleBugReportButton = () => { if (bugReportMode === 'auto') _bugReportUserPref.value = !_bugReportUserPref.value; };
 
   return {
     showInfoBar,
@@ -67,6 +53,7 @@ export const useSettingsStore = defineStore("settings", () => {
     toggleArrowButtons,
     showMapRibbon,
     toggleMapRibbon,
+    bugReportMode,
     showBugReportButton,
     toggleBugReportButton,
     adminEnabled,

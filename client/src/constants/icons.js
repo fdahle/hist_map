@@ -201,3 +201,38 @@ export const ICON_BUG = `<svg viewBox="0 0 24 24" width="16" height="16" fill="n
 
 /** Save image / screenshot */
 export const ICON_SAVE_IMAGE = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
+
+/**
+ * Generate SVG markup for a camera map marker (centered anchor, for camera position layers)
+ * @param {string} color - Hex fill color
+ * @param {number} width - Icon width in pixels
+ * @param {number} height - Icon height in pixels
+ * @returns {string} SVG markup
+ */
+export function getCameraMapIcon(color, width = 28, height = 28) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${width}" height="${height}">
+    <rect x="2" y="7" width="20" height="13" rx="2" fill="${color}" stroke="white" stroke-width="1.2"/>
+    <circle cx="12" cy="13.5" r="4.5" fill="white"/>
+    <circle cx="12" cy="13.5" r="2.5" fill="${color}"/>
+    <rect x="8.5" y="4" width="4" height="3.5" rx="1" fill="${color}" stroke="white" stroke-width="1"/>
+    <rect x="16.5" y="8.5" width="2.5" height="1.5" rx="0.5" fill="white"/>
+  </svg>`;
+}
+
+/**
+ * Generate SVG markup for a crosshair/GCP map marker (centered anchor, for ground control points)
+ * @param {string} color - Hex color
+ * @param {number} width - Icon width in pixels
+ * @param {number} height - Icon height in pixels
+ * @returns {string} SVG markup
+ */
+export function getCrosshairMapIcon(color, width = 26, height = 26) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="${width}" height="${height}">
+    <circle cx="12" cy="12" r="7" fill="none" stroke="${color}" stroke-width="2"/>
+    <circle cx="12" cy="12" r="2" fill="${color}"/>
+    <line x1="2" y1="12" x2="8" y2="12" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+    <line x1="16" y1="12" x2="22" y2="12" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+    <line x1="12" y1="2" x2="12" y2="8" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+    <line x1="12" y1="16" x2="12" y2="22" stroke="${color}" stroke-width="2" stroke-linecap="round"/>
+  </svg>`;
+}

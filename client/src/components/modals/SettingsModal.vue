@@ -78,7 +78,7 @@
                 </div>
               </div>
 
-              <div class="setting-row">
+              <div v-if="bugReportMode === 'auto'" class="setting-row">
                 <div class="setting-info">
                   <label for="bug-report-toggle">Show Bug Report Button</label>
                   <p class="setting-desc">
@@ -178,6 +178,7 @@ const goToAdmin = () => {
 // Extract State (Must use storeToRefs to keep it reactive!)
 const { showInfoBar, showArrowButtons, showMapRibbon, showBugReportButton, theme, adminEnabled } = storeToRefs(settingsStore);
 const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleBugReportButton, toggleTheme } = settingsStore;
+const bugReportMode = import.meta.env.VITE_BUG_REPORT || 'auto';
 </script>
 
 <style scoped>

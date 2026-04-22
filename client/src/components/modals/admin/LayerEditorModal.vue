@@ -203,6 +203,8 @@
                   <option value="">— auto —</option>
                   <option value="circle">circle</option>
                   <option value="square">square</option>
+                  <option value="camera">camera (SfM positions)</option>
+                  <option value="crosshair">crosshair (GCPs)</option>
                 </select>
               </div>
             </div>

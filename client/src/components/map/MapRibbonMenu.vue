@@ -32,9 +32,9 @@
     <div class="ribbon-content" :class="{ 'ctx-active': activeTab === 'layer' && selectedLayer }">
       <!-- Main Tab -->
       <div v-if="activeTab === 'main'" class="ribbon-panel">
-        <div class="ribbon-group">
+        <div v-if="allowUpload" class="ribbon-group">
           <div class="ribbon-group-buttons">
-            <button class="ribbon-btn" @click="fileInput.click()" :disabled="!allowUpload">
+            <button class="ribbon-btn" @click="fileInput.click()">
               <span class="btn-icon" v-html="ICON_ADD_LAYER"></span>
               <span class="btn-label">Add Layer</span>
             </button>
@@ -688,7 +688,6 @@ const showLayerInfo = () => {
   rows.push({ key: 'Name', value: layer.name });
   rows.push({ key: 'Type', value: TYPE_LABELS[layer.type] || layer.type });
   if (layer.geometryType) rows.push({ key: 'Geometry', value: GEOM_LABELS[layer.geometryType] || layer.geometryType });
-  if (layer.color) rows.push({ key: 'Color', value: layer.color });
   if (layer.crsCompatible !== null) rows.push({ key: 'CRS match', value: layer.crsCompatible ? 'Yes' : 'No' });
 
   // Layer CRS — always shown, even when not detected
@@ -1714,5 +1713,26 @@ const removeSelected = () => {
   flex: 1;
   height: 12px;
   border-radius: 3px;
+}
+
+@media (max-width: 768px) {
+  .ribbon-tabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ribbon-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .ribbon-content {
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .ribbon-content::-webkit-scrollbar {
+    display: none;
+  }
+  .tab-btn {
+    padding: 4px 12px;
+    flex-shrink: 0;
+  }
 }
 </style>

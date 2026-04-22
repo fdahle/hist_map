@@ -223,6 +223,20 @@ docker compose up --build
 
 ## Troubleshooting
 
+### Site Title and Favicon
+Set these in your root `.env` before building the client:
+
+```env
+VITE_SITE_TITLE=My Map
+VITE_SITE_FAVICON=/favicon.png
+```
+
+Place the favicon file in `client/public/` — everything in that folder is served from the root path, so `client/public/favicon.png` becomes `/favicon.png`. Then rebuild the client container to apply the changes:
+
+```bash
+sudo docker compose build client && sudo docker compose up -d client
+```
+
 ### Port Already in Use
 Change ports in `docker-compose.yml` or the root `.env` file (copy `.env.example` as a starting point).
 
@@ -233,6 +247,23 @@ Change ports in `docker-compose.yml` or the root `.env` file (copy `.env.example
 
 ### Admin Password
 On first run a setup wizard will prompt you to set an admin password. To reset it, delete `server/data/.credentials` and restart the server.
+
+### Disabling the Admin Panel
+Once your layers are configured you can hide the admin panel entirely. In your root `.env` file, set:
+
+```bash
+ADMIN_ENABLED=false
+```
+
+Then recreate the server container to apply the change:
+
+```bash
+docker compose up -d server
+```
+
+This strips all `/admin/*` routes from the server at the network level. To re-enable it, set `ADMIN_ENABLED=true` and run `docker compose up -d server` again.
+
+> **Note:** Use `docker compose up -d` (not `docker compose restart`) when changing `.env` — `restart` does not re-read environment variables.
 
 ### Large Files
 For very large files, upload and processing are handled automatically by the Admin interface. Processing options (decimation, COPC conversion, COG creation) can be configured before uploading.
