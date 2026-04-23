@@ -161,6 +161,28 @@ const dataRateLimit = rateLimit({
   message: { error: 'Too many requests, please try again later.' },
 });
 
+// Rate limit for public endpoints that perform filesystem operations.
+const generalRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+// Rate limit for all admin endpoints — prevents resource exhaustion even when authenticated.
+const adminRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
+// Apply rate limits to route groups before any route handler is registered.
+app.use('/admin', adminRateLimit);
+app.use(['/config', '/viewer', '/health'], generalRateLimit);
+
 // ── Admin disabled guard ───────────────────────────────────────────────────────
 // When ADMIN_ENABLED=false all /admin/* routes return 404 — the panel does not
 // exist at the network level. setup-status is kept alive so the client can
@@ -910,7 +932,7 @@ app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
 // Compression is intentionally disabled for /data: gzip encoding destroys the
 // byte offsets that HTTP range requests rely on, breaking geotiff.js tile reads
 // (it issues Range: bytes= requests to stream individual tiles from COG files).
-app.use('/data', (req, res, next) => {
+app.use('/data', dataRateLimit, (req, res, next) => {
   res.set('Cache-Control', isDevelopment ? 'no-store' : 'public, max-age=86400');
   // Tell clients (and geotiff.js) that we support byte-range requests.
   res.set('Accept-Ranges', 'bytes');
