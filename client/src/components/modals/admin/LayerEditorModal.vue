@@ -169,34 +169,32 @@
           <template v-if="draft.type === 'geojson'">
             <div class="field-row">
               <div class="field-group">
-                <label>Badge Color</label>
-                <div class="color-row">
-                  <input type="color" class="color-swatch" :value="/^#[0-9a-f]{6}$/i.test(draft.color) ? draft.color : '#000000'" @input="draft.color = $event.target.value" />
-                  <input v-model="draft.color" type="text" placeholder="#ff0000" />
-                </div>
-              </div>
-              <div class="field-group">
                 <label>Stroke Color</label>
                 <div class="color-row">
                   <input type="color" class="color-swatch" :value="/^#[0-9a-f]{6}$/i.test(draft.stroke_color) ? draft.stroke_color : '#000000'" @input="draft.stroke_color = $event.target.value" />
                   <input v-model="draft.stroke_color" type="text" placeholder="#ff0000" />
                 </div>
               </div>
-            </div>
-            <div class="field-row">
               <div class="field-group">
-                <label>Fill Color</label>
+                <label>Fill Color<FieldHint text="'auto' = stroke color at 50% opacity · 'none' = transparent · or a hex color like #ff0000" /></label>
                 <div class="color-row">
                   <input
                     type="color"
                     class="color-swatch"
-                    :value="/^#[0-9a-f]{6}$/i.test(draft.fill_color) ? draft.fill_color : '#000000'"
-                    :disabled="!draft.fill_color || draft.fill_color === 'none'"
+                    :value="fillSwatchColor(draft.fill_color, draft.stroke_color)"
+                    :disabled="!fillIsHex(draft.fill_color)"
                     @input="draft.fill_color = $event.target.value"
                   />
-                  <input v-model="draft.fill_color" type="text" placeholder="none" />
+                  <input
+                    v-model="draft.fill_color"
+                    type="text"
+                    placeholder="auto / none / #ff0000"
+                    @blur="draft.fill_color = normalizeFillColor(draft.fill_color)"
+                  />
                 </div>
               </div>
+            </div>
+            <div class="field-row">
               <div class="field-group">
                 <label>Point Type</label>
                 <select v-model="draft.pointType">
@@ -352,7 +350,7 @@ function blankDraft() {
     // tile
     tileSize: null,
     // geojson
-    color: '#3b82f6', stroke_color: '#3b82f6', fill_color: '',
+    stroke_color: '#3b82f6', fill_color: 'auto',
     render_mode: '', pointType: '', group_by: '', search_fields: [],
     // geotiff
     opacity: null, noDataValue: null, normalize: false, overviews: false,
@@ -412,6 +410,27 @@ watch(() => props.layer, (layer) => {
   validationError.value = '';
 }, { immediate: true });
 
+// ── Fill color helpers ────────────────────────────────────────
+const HEX6 = /^#[0-9a-f]{6}$/i;
+
+function fillIsHex(val) {
+  return HEX6.test(val);
+}
+
+function fillSwatchColor(fillColor, strokeColor) {
+  if (HEX6.test(fillColor)) return fillColor;
+  if (HEX6.test(strokeColor)) return strokeColor;
+  return '#000000';
+}
+
+function normalizeFillColor(val) {
+  const v = (val ?? '').trim();
+  if (!v || v === 'auto' || v === 'automatic') return 'auto';
+  if (v === 'none') return 'none';
+  if (HEX6.test(v)) return v.toLowerCase();
+  return 'auto';
+}
+
 // ── Validation & save ──────────────────────────────────────────
 function validate() {
   const d = draft.value;
@@ -466,7 +485,6 @@ function save() {
   }
 
   if (d.type === 'geojson') {
-    if (d.color?.trim())        out.color        = d.color.trim();
     if (d.stroke_color?.trim()) out.stroke_color = d.stroke_color.trim();
     if (d.fill_color?.trim())   out.fill_color   = d.fill_color.trim();
     if (d.render_mode?.trim())  out.render_mode  = d.render_mode.trim();

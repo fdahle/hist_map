@@ -71,10 +71,34 @@ export function fileTypeToLayerType(fileType) {
   }
 }
 
+// ── Path helpers ──────────────────────────────────────────────────────────────
+
+const SAFE_LAYER_EXTENSIONS = new Set([
+  '.geojson', '.geojsonl',
+  '.tif', '.tiff',
+  '.obj', '.ply', '.stl',
+  '.las', '.laz', '.copc.laz',
+  '.mtl', '.csv',
+  '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp',
+]);
+
+export function safeLayerExt(ext) {
+  const e = typeof ext === 'string' ? ext.toLowerCase() : '';
+  if (!SAFE_LAYER_EXTENSIONS.has(e)) throw new Error(`Disallowed file extension: ${e}`);
+  return e;
+}
+
+export function resolveInDir(baseDir, ...parts) {
+  const base = path.resolve(baseDir);
+  const full = path.resolve(base, ...parts);
+  if (!full.startsWith(base + path.sep)) throw new Error('Path traversal detected.');
+  return full;
+}
+
 // ── CRUD ───────────────────────────────────────────────────────────────────────
 
 export async function readLayerMeta(layersDir, id) {
-  const metaPath = path.join(layersDir, id, `${id}.meta.json`);
+  const metaPath = resolveInDir(layersDir, id, `${id}.meta.json`);
   try {
     const raw = await fs.readFile(metaPath, 'utf8');
     return JSON.parse(raw);
@@ -84,7 +108,7 @@ export async function readLayerMeta(layersDir, id) {
 }
 
 export async function writeLayerMeta(layersDir, id, meta) {
-  const metaPath = path.join(layersDir, id, `${id}.meta.json`);
+  const metaPath = resolveInDir(layersDir, id, `${id}.meta.json`);
   await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf8');
 }
 
@@ -107,10 +131,7 @@ export async function listLayers(layersDir) {
 
 export async function deleteLayer(layersDir, id) {
   validateLayerId(id);
-  const layerDir  = path.join(layersDir, id);
-  const resolved  = path.resolve(layerDir);
-  const base      = path.resolve(layersDir);
-  if (!resolved.startsWith(base + path.sep)) throw new Error('Invalid layer ID.');
+  const layerDir = resolveInDir(layersDir, id);
   await fs.rm(layerDir, { recursive: true, force: true });
 }
 

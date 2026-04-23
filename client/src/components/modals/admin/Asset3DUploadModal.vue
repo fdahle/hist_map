@@ -36,11 +36,12 @@
                       <input type="radio" v-model="fs.optimize" value="" />
                       <span>Save original</span>
                     </label>
-                    <label class="seg-option">
-                      <input type="radio" v-model="fs.optimize" value="copc" />
+                    <label class="seg-option" :class="{ 'seg-option--disabled': !pdalAvailable }" :title="!pdalAvailable ? 'PDAL is not installed on the server' : undefined">
+                      <input type="radio" v-model="fs.optimize" value="copc" :disabled="!pdalAvailable" />
                       <span>Convert to COPC</span>
                     </label>
                   </div>
+                  <p v-if="!pdalAvailable" class="lib-warning">PDAL is not installed on the server — COPC conversion is unavailable.</p>
                 </div>
 
                 <div class="field-group">
@@ -99,8 +100,9 @@ import { ref, watch } from 'vue';
 import FieldHint from '../../ui/FieldHint.vue';
 
 const props = defineProps({
-  isOpen: Boolean,
-  files:  { type: Array, default: () => [] },
+  isOpen:        Boolean,
+  files:         { type: Array,    default: () => [] },
+  pdalAvailable: { type: Boolean,  default: true },
 });
 
 const emit = defineEmits(['confirm', 'cancel']);
@@ -147,15 +149,15 @@ function formatSize(bytes) {
 
 const fileSettings = ref([]);
 
-watch(() => props.files, (files) => {
+watch(() => [props.files, props.pdalAvailable], ([files]) => {
   fileSettings.value = files.map(f => ({
     name:         f.name,
     size:         f.size,
-    optimize:     isPointcloud(f.name) ? 'copc' : '',   // default to COPC for point clouds
+    optimize:     isPointcloud(f.name) && props.pdalAvailable ? 'copc' : '',
     sourceCrs:    '',
     keepOriginal: false,
   }));
-}, { immediate: true });
+}, { immediate: true, deep: false });
 
 // ── Confirm ────────────────────────────────────────────────────────────────────
 
@@ -326,6 +328,19 @@ function confirm() {
 .seg-option + .seg-option { border-left: 1px solid var(--admin-border, #e0e0e0); }
 .seg-option input[type="radio"] { display: none; }
 .seg-option:has(input:checked) { background: #3b82f6; color: #fff; }
+.seg-option--disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.lib-warning {
+  margin: 0.3rem 0 0;
+  font-size: 0.75rem;
+  color: #b45309;
+  background: #fef3c7;
+  border-radius: 4px;
+  padding: 0.3rem 0.55rem;
+}
+:global(body.theme-dark) .lib-warning {
+  color: #fbbf24;
+  background: #2a1f06;
+}
 
 /* ── Toggle switch ───────────────────────────────────────────────────────────── */
 .toggle-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }

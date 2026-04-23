@@ -44,29 +44,43 @@ self.onmessage = async (e) => {
       position += chunk.length;
     }
 
-    log("Parsing JSON...");
-    const geojson = JSON.parse(new TextDecoder("utf-8").decode(allChunks));
-    log("JSON parsed — streaming features to main thread...");
-
-    // Extract the data CRS from the GeoJSON's top-level "crs" property.
-    // Many datasets (e.g. QGIS exports) embed a CRS like EPSG:3031. If
-    // present, the main thread must use it as dataProjection so OpenLayers
-    // doesn't incorrectly assume EPSG:4326.
+    log("Parsing...");
+    const text = new TextDecoder("utf-8").decode(allChunks);
+    let featuresList;
     let dataProjection = null;
-    if (geojson.crs?.properties?.name) {
-      const urn = geojson.crs.properties.name;
-      // Handles "urn:ogc:def:crs:EPSG::3031", "EPSG:3031", and
-      // "http://www.opengis.net/def/crs/EPSG/0/3031" formats.
-      const match = urn.match(/EPSG:{1,2}(\d+)/) ?? urn.match(/\/EPSG\/\d+\/(\d+)/i);
-      if (match) dataProjection = `EPSG:${match[1]}`;
+    let extraMetadata  = {};
+
+    if (url.endsWith('.geojsonl')) {
+      // NDJSON: first line is a metadata header ({_crs}), remaining lines are Features
+      const lines = text.split('\n').filter(Boolean);
+      const header = lines.length > 0 ? JSON.parse(lines[0]) : {};
+      if (header._crs) {
+        const m = header._crs.match(/EPSG:(\d+)/i);
+        if (m) dataProjection = `EPSG:${m[1]}`;
+      }
+      featuresList  = lines.slice(1).map(line => JSON.parse(line));
+      extraMetadata = header._metadata ?? {};
+    } else {
+      const geojson = JSON.parse(text);
+      // Extract the data CRS from the GeoJSON's top-level "crs" property.
+      // Many datasets (e.g. QGIS exports) embed a CRS like EPSG:3031. If
+      // present, the main thread must use it as dataProjection so OpenLayers
+      // doesn't incorrectly assume EPSG:4326.
+      if (geojson.crs?.properties?.name) {
+        const urn = geojson.crs.properties.name;
+        // Handles "urn:ogc:def:crs:EPSG::3031", "EPSG:3031", and
+        // "http://www.opengis.net/def/crs/EPSG/0/3031" formats.
+        const match = urn.match(/EPSG:{1,2}(\d+)/) ?? urn.match(/\/EPSG\/\d+\/(\d+)/i);
+        if (match) dataProjection = `EPSG:${match[1]}`;
+      }
+      featuresList  = geojson.features ?? [];
+      extraMetadata = geojson._metadata ?? {};
     }
     log(`Detected data CRS: ${dataProjection ?? "EPSG:4326 (default)"}`);
 
-    const featuresList = geojson.features ?? [];
-
     if (debug) {
       console.debug(`=== LAYER DEBUG — ${layerName} ===`);
-      console.debug("  Raw crs property:", JSON.stringify(geojson.crs ?? null));
+      console.debug("  Format:", url.endsWith('.geojsonl') ? 'NDJSON (.geojsonl)' : 'GeoJSON (.geojson)');
       console.debug("  Resolved dataProjection:", dataProjection ?? "null → OL will default to EPSG:4326");
       console.debug("  Feature count:", featuresList.length);
       if (featuresList.length > 0) {
@@ -111,7 +125,7 @@ self.onmessage = async (e) => {
       });
     }
 
-    self.postMessage({ type: "COMPLETE", layerId, metadata: geojson._metadata ?? {} });
+    self.postMessage({ type: "COMPLETE", layerId, metadata: extraMetadata });
 
   } catch (error) {
     if (debug) console.debug(`[Worker - ${layerName}] Failed:`, error);

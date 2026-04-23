@@ -197,7 +197,11 @@ export function processGeoJsonObject(geojson, { targetCrs, simplifyTolerance, co
   geojson = simplifyGeojson(geojson, simplifyTolerance ?? 50);
   if (simplifyTolerance > 0) steps.push(`Simplified (tolerance ${simplifyTolerance} m)`);
 
-  geojson = truncateGeojson(geojson, coordinatePrecision ?? 0);
+  const prec = coordinatePrecision ?? 0;
+  geojson = truncateGeojson(geojson, prec);
+  steps.push(prec === 0
+    ? 'Coordinates rounded to whole units (precision 0)'
+    : `Coordinates truncated to ${prec} decimal place${prec === 1 ? '' : 's'}`);
 
   if (modelMap?.size || pointcloudMap?.size) {
     const { geojson: linked, linkedCount } = linkAssetsToFeatures(geojson, modelMap ?? new Map(), pointcloudMap ?? new Map());

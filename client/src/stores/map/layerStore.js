@@ -54,6 +54,8 @@ export const useLayerStore = defineStore("layers", () => {
     pointType = null,
     attribution = null,
     sourceCrs = null,
+    thumbnailUrl = null,
+    downloadUrl = null,
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
@@ -110,6 +112,8 @@ export const useLayerStore = defineStore("layers", () => {
       // attribution text for base tile/WMS/WMTS layers (HTML allowed)
       attribution,
       sourceCrs,
+      thumbnailUrl,
+      downloadUrl,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.

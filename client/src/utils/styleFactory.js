@@ -110,6 +110,9 @@ export function createVectorStyle(
   strokeWidth = DEFAULT_STROKE_WIDTH,
   opacity = DEFAULT_OPACITY
 ) {
+  // 'auto' / 'automatic' both mean "derive fill from stroke with opacity"
+  if (fillColor === 'automatic' || fillColor === 'auto') fillColor = null;
+
   const stroke = (strokeColor && strokeColor !== 'none')
     ? new Stroke({ color: strokeColor, width: strokeWidth })
     : null;

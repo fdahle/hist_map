@@ -87,6 +87,21 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
             if (resolved) feature.set("_thumbnailUrl", resolved);
           }
 
+          if (!feature.get("_downloadUrl") && layer.downloadUrl) {
+            const resolved = layer.downloadUrl.replace(/\$<([^>]+)>/g, (_, expr) => {
+              const parts = expr.split(':');
+              const val = feature.get(parts[0]);
+              if (val == null) return '';
+              const str = String(val);
+              if (parts.length === 1) return str;
+              const start = parts[1] !== '' ? parseInt(parts[1], 10) : 0;
+              if (parts.length === 2) return str.slice(start);
+              const end = parts[2] !== '' ? parseInt(parts[2], 10) : undefined;
+              return str.slice(start, end);
+            });
+            if (resolved) feature.set("_downloadUrl", resolved);
+          }
+
           if (layer.groupBy) {
             const val = feature.get(layer.groupBy);
             if (val != null && String(val) !== "") groupByValues.add(String(val));

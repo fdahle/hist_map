@@ -104,6 +104,7 @@
         <Asset3DUploadModal
           :is-open="showAssetModal"
           :files="pendingAssets"
+          :pdal-available="pdalAvailable"
           @confirm="doAssetUpload"
           @cancel="showAssetModal = false; pendingAssets = []"
         />
@@ -212,6 +213,8 @@ const emit = defineEmits(['close', 'assignments-changed']);
 
 const loading        = ref(false);
 const loadError      = ref('');
+const saveError      = ref('');
+const saveSuccess    = ref('');
 let _isInitialLoad   = false;
 
 const models      = ref([]);  // { filename, dataPath }
@@ -230,6 +233,7 @@ const dragOverId  = ref(null);
 const layerDisplayName = ref('');
 const uploading        = ref(false);
 const uploadError      = ref('');
+const pdalAvailable    = ref(true);
 const assetFileInputRef = ref(null);
 const showAssetModal   = ref(false);
 const pendingAssets    = ref([]);
@@ -354,12 +358,18 @@ async function loadData() {
   saveSuccess.value = '';
   _isInitialLoad = true;
   try {
-    const [assetsRes, geojsonRes] = await Promise.all([
+    const [assetsRes, geojsonRes, libsRes] = await Promise.all([
       fetch(getApiUrl(`/admin/layers/${props.layerId}`), { headers: { Authorization: props.authHeader } }),
       fetch(getApiUrl(`data/layers/${props.layerId}/${props.layerId}.geojson`)),
+      fetch(getApiUrl('/admin/system-libraries'), { headers: { Authorization: props.authHeader } }),
     ]);
     if (!assetsRes.ok) throw new Error(`Failed to load assets (${assetsRes.status})`);
     if (!geojsonRes.ok) throw new Error(`Failed to load GeoJSON (${geojsonRes.status})`);
+
+    if (libsRes.ok) {
+      const libs = await libsRes.json();
+      pdalAvailable.value = libs.find(l => l.name === 'PDAL')?.available ?? true;
+    }
 
     const layerMeta = await assetsRes.json();
     const geojson   = await geojsonRes.json();

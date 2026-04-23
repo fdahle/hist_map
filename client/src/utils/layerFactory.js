@@ -219,10 +219,11 @@ export function createGeoJSONLayerConfig(layerConf, layerId) {
     layerInstance: null, // Will be created after download
     type: "geojson",
     visible: layerConf.visible,
-    // color is the UI badge color; falls back to stroke_color if only that is provided
-    color: layerConf.color ?? layerConf.stroke_color,
+    // color is the UI badge color; auto-derived from stroke (or fill if hex) when not explicit
+    color: layerConf.color ?? layerConf.stroke_color ?? (/^#[0-9a-f]{6}$/i.test(layerConf.fill_color) ? layerConf.fill_color : null),
     strokeColor: layerConf.stroke_color ?? null,
-    fillColor: layerConf.fill_color ?? null,
+    // 'auto'/'automatic'/null/'' all mean "derive fill from stroke with opacity" at render time
+    fillColor: (!layerConf.fill_color || layerConf.fill_color === 'auto' || layerConf.fill_color === 'automatic') ? null : layerConf.fill_color,
     renderMode: layerConf.render_mode ?? 'vector',
     url: layerConf.url,
     searchFields: layerConf.search_fields || [],
@@ -231,6 +232,7 @@ export function createGeoJSONLayerConfig(layerConf, layerId) {
     groupBy: layerConf.group_by ?? null,
     pointType: layerConf.pointType ?? null,
     thumbnailUrl: layerConf.thumbnail_url ?? null,
+    downloadUrl: layerConf.download_url ?? null,
   };
 }
 

@@ -32,6 +32,8 @@ import {
   createSubFileMeta,
   writeLayerMeta,
   readLayerMeta,
+  resolveInDir,
+  safeLayerExt,
 } from '../src/layerStore.js';
 
 // ── File-type helpers ──────────────────────────────────────────────────────────
@@ -68,6 +70,26 @@ function pointcloudExt(filename) {
 function extractTextureRefs(mtlContent) {
   return (mtlContent.match(/(?:map_Kd|map_Ka|map_Ks|map_Ns|map_d|map_bump|bump)\s+(\S+)/gi) ?? [])
     .map(m => m.split(/\s+/)[1]);
+}
+
+// ── GeoJSON / NDJSON file I/O ─────────────────────────────────────────────────
+
+export function parseGeoFile(raw, filePath) {
+  if (filePath.endsWith('.geojsonl')) {
+    const lines = raw.split('\n').filter(Boolean);
+    const header = lines.length > 0 ? JSON.parse(lines[0]) : {};
+    return { features: lines.slice(1).map(l => JSON.parse(l)), header };
+  }
+  const { features = [], ...rest } = JSON.parse(raw);
+  return { features, header: rest };
+}
+
+export function serializeGeoFile(features, header, filePath) {
+  if (filePath.endsWith('.geojsonl')) {
+    const body = features.map(f => JSON.stringify(f)).join('\n');
+    return `${JSON.stringify(header)}\n${body}`;
+  }
+  return JSON.stringify({ ...header, type: 'FeatureCollection', features });
 }
 
 // ── Main batch processor ───────────────────────────────────────────────────────
@@ -172,12 +194,35 @@ async function _processGeoJsonLayer(geoFile, modelFiles, pointcloudFiles, fileMa
     meta.originalBackup = backupName;
   }
 
-  await fs.writeFile(path.join(layerDir, `${id}.geojson`), JSON.stringify(processed), 'utf8');
+  const saveAsNdjson = settings.optimize === 'ndjson';
+  if (saveAsNdjson) {
+    const ndjsonHeader = JSON.stringify({ _crs: targetCrs ?? null });
+    const ndjsonBody   = (processed.features ?? []).map(f => JSON.stringify(f)).join('\n');
+    await fs.writeFile(path.join(layerDir, `${id}.geojsonl`), `${ndjsonHeader}\n${ndjsonBody}`, 'utf8');
+    meta.extension = '.geojsonl';
+    meta.optimized = true;
+    steps.push('Saved as NDJSON (.geojsonl) for streaming-efficient access');
+  } else {
+    await fs.writeFile(path.join(layerDir, `${id}.geojson`), JSON.stringify(processed), 'utf8');
+    steps.push('Saved as GeoJSON (.geojson)');
+  }
   meta.processingLog = steps;
   meta.sourceCrs     = sourceCrs ?? null;
   meta.targetCrs     = targetCrs ?? null;
   meta.featureCount  = processed.features?.length ?? null;
   meta.featureIndex  = processed.features?.map((f, i) => ({ id: f.properties?._featureId ?? null, index: i })) ?? null;
+
+  // Detect dominant geometry type from features
+  const geomTypes = new Set(
+    (processed.features ?? []).map(f => f.geometry?.type).filter(Boolean)
+  );
+  meta.geometryType = (
+    geomTypes.has('Point')      || geomTypes.has('MultiPoint')      ? 'Point' :
+    geomTypes.has('LineString') || geomTypes.has('MultiLineString') ? 'LineString' :
+    geomTypes.has('Polygon')    || geomTypes.has('MultiPolygon')    ? 'Polygon' :
+    null
+  );
+
   await writeLayerMeta(layersDir, id, meta);
 
   return {
@@ -185,7 +230,7 @@ async function _processGeoJsonLayer(geoFile, modelFiles, pointcloudFiles, fileMa
     type:         'geojson',
     originalName: geoFile.originalname,
     displayName:  meta.layerConfig.displayName,
-    dataPath:     `data/layers/${id}/${id}.geojson`,
+    dataPath:     `data/layers/${id}/${id}${saveAsNdjson ? '.geojsonl' : '.geojson'}`,
     featureCount: processed.features?.length ?? 0,
     sourceCrs,
     targetCrs,
@@ -479,11 +524,11 @@ async function _processCsvLayer(csvFile, layersDir, allSettings) {
 
 export async function addSubFile(layerId, file, role, layersDir, settings = {}) {
   const meta     = await readLayerMeta(layersDir, layerId);
-  const layerDir = path.join(layersDir, layerId);
+  const layerDir = resolveInDir(layersDir, layerId);
   const subId    = uuidv4();
   const origExt  = path.extname(file.originalname).toLowerCase() || '';
   const rawFile  = `${subId}${origExt}`;
-  const rawPath  = path.join(layerDir, rawFile);
+  const rawPath  = resolveInDir(layerDir, rawFile);
   await fs.writeFile(rawPath, file.buffer);
 
   let finalExt = origExt;
@@ -532,7 +577,7 @@ export async function addSubFile(layerId, file, role, layersDir, settings = {}) 
  */
 export async function addSubFileBatch(layerId, files, layersDir, allSettings = {}) {
   const meta     = await readLayerMeta(layersDir, layerId);
-  const layerDir = path.join(layersDir, layerId);
+  const layerDir = resolveInDir(layersDir, layerId);
 
   // Build fileMap so _saveModelSubFile can find companion MTL / textures
   const fileMap = new Map();
@@ -610,9 +655,12 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
 
 export async function relinkGeojson(filePath, layersDir) {
   const raw = await fs.readFile(filePath, 'utf8');
-  let geojson;
-  try { geojson = JSON.parse(raw); }
-  catch { throw new Error(`Could not parse ${path.basename(filePath)} as JSON.`); }
+  let features, header;
+  try {
+    ({ features, header } = parseGeoFile(raw, filePath));
+  } catch {
+    throw new Error(`Could not parse ${path.basename(filePath)}.`);
+  }
 
   const modelMap      = new Map();
   const pointcloudMap = new Map();
@@ -629,8 +677,9 @@ export async function relinkGeojson(filePath, layersDir) {
     }
   } catch { /* no layers dir yet */ }
 
-  const { geojson: linked, linkedCount, linkedAssets } = linkAssetsToFeatures(geojson, modelMap, pointcloudMap);
-  await fs.writeFile(filePath, JSON.stringify(linked), 'utf8');
+  const fc = { type: 'FeatureCollection', features };
+  const { geojson: linked, linkedCount, linkedAssets } = linkAssetsToFeatures(fc, modelMap, pointcloudMap);
+  await fs.writeFile(filePath, serializeGeoFile(linked.features, header, filePath), 'utf8');
 
   return {
     filename:             path.basename(filePath),
@@ -682,8 +731,8 @@ export async function applyCsvLink(layerId, layersDir, csvLink, oldJoinedCols = 
   if (!subFile) throw new Error(`Sub-file ${subFileId} not found on layer ${layerId}.`);
 
   // Read the CSV from disk
-  const csvExt  = subFile.extension || '.csv';
-  const csvPath = path.join(layersDir, layerId, `${subFileId}${csvExt}`);
+  const csvExt  = safeLayerExt(subFile.extension || '.csv');
+  const csvPath = resolveInDir(layersDir, layerId, `${subFileId}${csvExt}`);
   const csvText = await fs.readFile(csvPath, 'utf8');
 
   // Detect delimiter from the first line
@@ -723,16 +772,16 @@ export async function applyCsvLink(layerId, layersDir, csvLink, oldJoinedCols = 
   // to avoid overwriting the feature's original join property with an identical-but-stringified copy)
   const newCols = csvColumns.filter((c) => c !== csvJoinColumn);
 
-  // Read the GeoJSON file
-  const ext         = meta.extension || '.geojson';
-  const geojsonPath = path.join(layersDir, layerId, `${layerId}${ext}`);
+  // Read the GeoJSON / NDJSON file
+  const ext         = safeLayerExt(meta.extension || '.geojson');
+  const geojsonPath = resolveInDir(layersDir, layerId, `${layerId}${ext}`);
   const raw         = await fs.readFile(geojsonPath, 'utf8');
-  const geojson     = JSON.parse(raw);
+  const { features: featuresList, header } = parseGeoFile(raw, geojsonPath);
 
   // Apply the join
   const colsToRemove = new Set(oldJoinedCols);
   let matchCount = 0;
-  geojson.features = geojson.features.map((feature) => {
+  const enriched = featuresList.map((feature) => {
     if (!feature.properties) feature.properties = {};
 
     // Remove stale columns from a previous join before adding fresh ones
@@ -752,8 +801,8 @@ export async function applyCsvLink(layerId, layersDir, csvLink, oldJoinedCols = 
     return feature;
   });
 
-  // Write the enriched GeoJSON back to disk
-  await fs.writeFile(geojsonPath, JSON.stringify(geojson), 'utf8');
+  // Write the enriched file back to disk
+  await fs.writeFile(geojsonPath, serializeGeoFile(enriched, header, geojsonPath), 'utf8');
 
   return newCols;
 }

@@ -34,6 +34,18 @@
                 <!-- GeoTIFF -->
                 <template v-if="isGeoTiff(fs.name)">
                   <div class="field-group">
+                    <label>No-data value <FieldHint text="Pixel value to treat as transparent / missing data (e.g. 0 or -9999). Leave blank to auto-detect from the source file." /></label>
+                    <input v-model="fs.cogNodata" type="text" placeholder="e.g. -9999" class="input-narrow" />
+                  </div>
+                  <div class="field-group">
+                    <label>Source CRS <FieldHint text="EPSG code of the projection embedded in the file. Auto-detected from metadata — override only if it is wrong or missing." /></label>
+                    <div class="crs-row">
+                      <input v-model="fs.cogCrs" type="text" placeholder="e.g. EPSG:4326" class="input-narrow" />
+                      <span v-if="fs.cogCrsDetecting" class="crs-badge detecting">Detecting…</span>
+                      <span v-else-if="fs.cogCrsDetected" class="crs-badge detected">Auto-detected</span>
+                    </div>
+                  </div>
+                  <div class="field-group">
                     <label>Format <FieldHint text="Save original keeps the file exactly as uploaded. Save optimized converts to Cloud Optimised GeoTIFF (COG) for efficient tile streaming — runs in the background." /></label>
                     <div class="seg-control">
                       <label class="seg-option">
@@ -42,7 +54,7 @@
                       </label>
                       <label class="seg-option">
                         <input type="radio" v-model="fs.optimize" value="cog" />
-                        <span>Save optimized</span>
+                        <span>Save optimized (COG)</span>
                       </label>
                     </div>
                   </div>
@@ -75,22 +87,10 @@
                       </div>
                     </div>
                   </div>
-                  <div class="field-group">
-                    <label>No-data value <FieldHint text="Pixel value to treat as transparent / missing data (e.g. 0 or -9999). Leave blank to auto-detect from the source file." /></label>
-                    <input v-model="fs.cogNodata" type="text" placeholder="e.g. -9999" class="input-narrow" />
-                  </div>
-                  <div class="field-group">
-                    <label>Source CRS <FieldHint text="EPSG code of the projection embedded in the file. Auto-detected from metadata — override only if it is wrong or missing." /></label>
-                    <div class="crs-row">
-                      <input v-model="fs.cogCrs" type="text" placeholder="e.g. EPSG:4326" class="input-narrow" />
-                      <span v-if="fs.cogCrsDetecting" class="crs-badge detecting">Detecting…</span>
-                      <span v-else-if="fs.cogCrsDetected" class="crs-badge detected">Auto-detected</span>
-                    </div>
-                  </div>
-                  <div class="field-group field-toggle-row">
-                    <label>Keep copy of original <FieldHint text="Retain the original file on the server alongside the processed version." /></label>
+                  <div class="field-group field-toggle-row" :class="{ 'toggle-row-disabled': !fs.optimize }">
+                    <label>Keep copy of original <FieldHint text="Retain the original file on the server alongside the COG version." /></label>
                     <div class="toggle-switch">
-                      <input :id="`keep-${i}`" v-model="fs.keepOriginal" type="checkbox" />
+                      <input :id="`keep-${i}`" v-model="fs.keepOriginal" type="checkbox" :disabled="!fs.optimize" />
                       <label :for="`keep-${i}`" class="slider"></label>
                     </div>
                   </div>
@@ -107,14 +107,14 @@
                       </label>
                       <label class="seg-option">
                         <input type="radio" v-model="fs.optimize" value="copc" />
-                        <span>Save optimized</span>
+                        <span>Save optimized (COPC)</span>
                       </label>
                     </div>
                   </div>
-                  <div class="field-group field-toggle-row">
-                    <label>Keep copy of original <FieldHint text="Retain the original file on the server alongside the processed version." /></label>
+                  <div class="field-group field-toggle-row" :class="{ 'toggle-row-disabled': !fs.optimize }">
+                    <label>Keep copy of original <FieldHint text="Retain the original file on the server alongside the COPC version." /></label>
                     <div class="toggle-switch">
-                      <input :id="`keep-pc-${i}`" v-model="fs.keepOriginal" type="checkbox" />
+                      <input :id="`keep-pc-${i}`" v-model="fs.keepOriginal" type="checkbox" :disabled="!fs.optimize" />
                       <label :for="`keep-pc-${i}`" class="slider"></label>
                     </div>
                   </div>
@@ -175,10 +175,23 @@
                       <input v-model.number="fs.shapeSettings.coordinatePrecision" type="number" min="0" max="10" placeholder="0" class="input-narrow" />
                     </div>
                   </div>
-                  <div class="field-group field-toggle-row">
-                    <label>Keep copy of original <FieldHint text="Retain the original file on the server alongside the processed version." /></label>
+                  <div class="field-group">
+                    <label>Format <FieldHint text="Save original stores a standard GeoJSON file after processing (reproject, simplify). Save optimized also converts to NDJSON (one feature per line) for efficient streaming of large datasets." /></label>
+                    <div class="seg-control">
+                      <label class="seg-option">
+                        <input type="radio" v-model="fs.optimize" value="" />
+                        <span>Save original</span>
+                      </label>
+                      <label class="seg-option">
+                        <input type="radio" v-model="fs.optimize" value="ndjson" />
+                        <span>Save optimized (NDJSON)</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div class="field-group field-toggle-row" :class="{ 'toggle-row-disabled': !fs.optimize }">
+                    <label>Keep copy of original <FieldHint text="Retain the raw uploaded file on the server alongside the processed NDJSON version." /></label>
                     <div class="toggle-switch">
-                      <input :id="`keep-geo-${i}`" v-model="fs.keepOriginal" type="checkbox" />
+                      <input :id="`keep-geo-${i}`" v-model="fs.keepOriginal" type="checkbox" :disabled="!fs.optimize" />
                       <label :for="`keep-geo-${i}`" class="slider"></label>
                     </div>
                   </div>
@@ -303,7 +316,7 @@ watch(() => props.files, async (files) => {
     }
     return {
       name: f.name, size: f.size,
-      optimize: 'cog', keepOriginal: false,
+      optimize: isGeoTiff(f.name) ? 'cog' : '', keepOriginal: false,
       doSimplify: true,
       cogCompression: 'lzw',
       cogResampling: 'nearest',
@@ -341,7 +354,7 @@ function confirm() {
     const entry = {
       visible:      true,
       optimize:     s.optimize || undefined,
-      keepOriginal: s.keepOriginal,
+      keepOriginal: s.optimize ? s.keepOriginal : false,
       csvSettings:  s.csvSettings,
       shapeSettings: {
         ...s.shapeSettings,
@@ -602,6 +615,10 @@ function formatSize(bytes) {
   transition: opacity 0.2s;
 }
 .simplify-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.toggle-row-disabled {
   opacity: 0.4;
   pointer-events: none;
 }

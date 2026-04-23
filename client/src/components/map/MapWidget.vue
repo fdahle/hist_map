@@ -42,7 +42,7 @@ import "ol/ol.css"; // OpenLayers CSS
 
 import Map from "ol/Map";
 import View from "ol/View";
-import { fromLonLat } from "ol/proj";
+import { fromLonLat, toLonLat } from "ol/proj";
 import { defaults as defaultControls, ScaleLine } from "ol/control";
 import { defaults as defaultInteractions } from "ol/interaction";
 import Feature from "ol/Feature";
@@ -139,6 +139,18 @@ onMounted(async () => {
     centerProjected = fromLonLat(centerValues, projectionCode);
   }
 
+  // Restore map position from sessionStorage if available (persists across in-session route changes)
+  const SESSION_POS_KEY = 'map_position';
+  let initialZoom = config.view.zoom;
+  try {
+    const saved = sessionStorage.getItem(SESSION_POS_KEY);
+    if (saved) {
+      const { lng, lat, zoom: z } = JSON.parse(saved);
+      centerProjected = fromLonLat([lng, lat], projectionCode);
+      initialZoom = z;
+    }
+  } catch { /* ignore corrupt storage data */ }
+
   // 3. Get view extent if specified
   const viewExtent = config.view.extent || config.projection_params?.extent;
 
@@ -151,7 +163,7 @@ onMounted(async () => {
     view: new View({
       projection: projectionCode,
       center: centerProjected,
-      zoom: config.view.zoom,
+      zoom: initialZoom,
       minZoom: config.view.minZoom,
       maxZoom: config.view.maxZoom,
       extent: viewExtent,  // Constrain panning to this extent
@@ -172,6 +184,16 @@ onMounted(async () => {
   }
 
   mapStore.setMap(map);
+
+  // Save position to sessionStorage on every map move so it survives route changes
+  map.on('moveend', () => {
+    const v = map.getView();
+    const c = v.getCenter();
+    if (c) {
+      const [lon, lat] = toLonLat(c, v.getProjection());
+      sessionStorage.setItem(SESSION_POS_KEY, JSON.stringify({ lng: lon, lat, zoom: v.getZoom() }));
+    }
+  });
 
   // ---- Pin layer ----
   const PIN_COLOR = '#e63946';

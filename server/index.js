@@ -20,11 +20,11 @@ import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import config, { isDevelopment, isProduction } from './src/config.js';
 import logger from './src/logger.js';
-import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, metaToConfigLayer, validateLayerId } from './src/layerStore.js';
+import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, metaToConfigLayer, validateLayerId, resolveInDir, safeLayerExt } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
-import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink } from './processors/uploadProcessor.js';
+import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink, parseGeoFile, serializeGeoFile } from './processors/uploadProcessor.js';
 import { convertToCog, isGdalAvailable } from './processors/geotiffProcessor.js';
-import { isPdalAvailable } from './processors/pointcloudProcessor.js';
+import { convertToCopc, isPdalAvailable } from './processors/pointcloudProcessor.js';
 
 const app = express();
 
@@ -432,7 +432,7 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
   try {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
-    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, thumbnail_url, pointType, csvLink } = req.body ?? {};
+    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, thumbnail_url, download_url, pointType, csvLink } = req.body ?? {};
     if (displayName  != null) meta.layerConfig.displayName  = String(displayName);
     if (visible      != null) meta.layerConfig.visible      = Boolean(visible);
     if (order        != null) meta.layerConfig.order        = Number(order);
@@ -447,6 +447,7 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     if (attribution  != null) meta.layerConfig.attribution  = String(attribution);
     if (Array.isArray(search_fields)) meta.layerConfig.search_fields = search_fields.map(String);
     if ('thumbnail_url' in (req.body ?? {})) meta.layerConfig.thumbnail_url = thumbnail_url ? String(thumbnail_url) : null;
+    if ('download_url'  in (req.body ?? {})) meta.layerConfig.download_url  = download_url  ? String(download_url)  : null;
     if ('pointType'     in (req.body ?? {})) meta.layerConfig.pointType     = pointType ? String(pointType) : null;
     // CRS override (any layer type)
     const { sourceCrs, tiffProjection } = req.body ?? {};
@@ -461,16 +462,16 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
         // Clear the link and strip previously joined columns from features
         if (oldJoinedCols.length > 0 && meta.fileType === 'geojson') {
           try {
-            const ext         = meta.extension || '.geojson';
-            const geojsonPath = path.join(layersDir, req.params.id, `${req.params.id}${ext}`);
+            const ext         = safeLayerExt(meta.extension || '.geojson');
+            const geojsonPath = resolveInDir(layersDir, req.params.id, `${req.params.id}${ext}`);
             const raw         = await fs.readFile(geojsonPath, 'utf8');
-            const geojson     = JSON.parse(raw);
+            const { features, header } = parseGeoFile(raw, geojsonPath);
             const colsToRemove = new Set(oldJoinedCols);
-            geojson.features  = geojson.features.map((f) => {
+            const updated = features.map((f) => {
               for (const col of colsToRemove) delete f.properties?.[col];
               return f;
             });
-            await fs.writeFile(geojsonPath, JSON.stringify(geojson), 'utf8');
+            await fs.writeFile(geojsonPath, serializeGeoFile(updated, header, geojsonPath), 'utf8');
           } catch { /* best-effort — meta still cleared */ }
         }
         meta.layerConfig.csvLink = null;
@@ -506,7 +507,7 @@ app.get('/admin/layers/:id/preview', requireAdminAuth, async (req, res) => {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
     if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Preview only available for GeoJSON layers.' });
-    const filePath = path.join(layersDir, req.params.id, `${req.params.id}${meta.extension}`);
+    const filePath = resolveInDir(layersDir, req.params.id, `${req.params.id}${safeLayerExt(meta.extension)}`);
     const raw = await fs.readFile(filePath, 'utf8');
     const geojson = JSON.parse(raw);
     const n = Math.min(parseInt(req.query.n ?? '5', 10), 50);
@@ -585,7 +586,7 @@ app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, re
     validateLayerId(id);
     validateLayerId(subId);
     const meta     = await readLayerMeta(layersDir, id);
-    const layerDir = path.join(layersDir, id);
+    const layerDir = resolveInDir(layersDir, id);
 
     const subIdx = meta.subFiles.findIndex(sf => sf.id === subId);
     if (subIdx === -1) return res.status(404).json({ error: 'Sub-file not found.' });
@@ -600,7 +601,7 @@ app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, re
 
     // Delete physical files (silently ignore missing files)
     for (const entry of toDelete) {
-      await fs.unlink(path.join(layerDir, `${entry.id}${entry.ext}`)).catch(() => {});
+      await fs.unlink(resolveInDir(layerDir, `${entry.id}${safeLayerExt(entry.ext)}`)).catch(() => {});
     }
 
     // Remove the sub-file and its companions from meta.subFiles
@@ -611,12 +612,23 @@ app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, re
     // remove dangling references from feature properties
     if (meta.fileType === 'geojson' && (subFile.role === 'model' || subFile.role === 'pointcloud')) {
       const urlToRemove = `data/layers/${id}/${subFile.id}${subFile.extension}`;
-      const geoPath = path.join(layerDir, `${id}.geojson`);
+      const geoExt  = safeLayerExt(meta.extension || '.geojson');
+      const geoPath = resolveInDir(layerDir, `${id}${geoExt}`);
       try {
-        const raw     = await fs.readFile(geoPath, 'utf8');
-        const geojson = JSON.parse(raw);
-        let modified  = false;
-        geojson.features = geojson.features.map(f => {
+        const raw = await fs.readFile(geoPath, 'utf8');
+        let features, header;
+        const isNdjson = geoExt === '.geojsonl';
+        if (isNdjson) {
+          const lines = raw.split('\n').filter(Boolean);
+          header   = lines.length > 0 ? JSON.parse(lines[0]) : {};
+          features = lines.slice(1).map(l => JSON.parse(l));
+        } else {
+          const geojson = JSON.parse(raw);
+          header   = { _metadata: geojson._metadata };
+          features = geojson.features ?? [];
+        }
+        let modified = false;
+        features = features.map(f => {
           if (!f.properties) return f;
           if (subFile.role === 'model' && Array.isArray(f.properties._model3dUrls)) {
             const prev = f.properties._model3dUrls.length;
@@ -631,10 +643,17 @@ app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, re
           return f;
         });
         if (modified) {
-          if (!geojson._metadata) geojson._metadata = {};
-          geojson._metadata.has3DModels    = geojson.features.some(f => f.properties?._model3dUrls?.length > 0);
-          geojson._metadata.hasPointClouds = geojson.features.some(f => f.properties?._pointcloudUrls?.length > 0);
-          await fs.writeFile(geoPath, JSON.stringify(geojson), 'utf8');
+          const md = header._metadata ?? {};
+          md.has3DModels    = features.some(f => f.properties?._model3dUrls?.length > 0);
+          md.hasPointClouds = features.some(f => f.properties?._pointcloudUrls?.length > 0);
+          header._metadata  = md;
+          if (isNdjson) {
+            const body = features.map(f => JSON.stringify(f)).join('\n');
+            await fs.writeFile(geoPath, `${JSON.stringify(header)}\n${body}`, 'utf8');
+          } else {
+            const fc = { type: 'FeatureCollection', features, _metadata: md };
+            await fs.writeFile(geoPath, JSON.stringify(fc), 'utf8');
+          }
         }
       } catch { /* GeoJSON read/write failure is non-fatal */ }
     }
@@ -673,8 +692,22 @@ function _startOptimizationJob(layerId, type, dataPath) {
           meta.status = 'ready'; // usable even without COG
         }
         await writeLayerMeta(layersDir, layerId, meta);
+      } else if (type === 'copc') {
+        const { success, step, originalBackup } = await convertToCopc(absPath, {
+          keepOriginal: meta.keepOriginal ?? false,
+        });
+        meta = await readLayerMeta(layersDir, layerId);
+        meta.processingLog.push(step);
+        if (success) {
+          meta.status   = 'ready';
+          meta.optimized = true;
+          meta.dataPath  = meta.dataPath.replace(/\.(las|laz)$/i, '.copc.laz');
+          if (originalBackup) meta.originalBackup = originalBackup;
+        } else {
+          meta.status = 'ready'; // usable even without COPC
+        }
+        await writeLayerMeta(layersDir, layerId, meta);
       }
-      // COPC conversion would go here when PDAL is wired up
       jobQueue.markDone(job.id);
       logger.info(`Optimisation job ${job.id} (${type}) done for layer ${layerId}`);
     } catch (err) {
@@ -732,15 +765,15 @@ app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req,
       }
     }
 
-    const ext = meta.extension || '.geojson';
-    const filePath = path.join(layersDir, id, `${id}${ext}`);
+    const ext = safeLayerExt(meta.extension || '.geojson');
+    const filePath = resolveInDir(layersDir, id, `${id}${ext}`);
     const raw = await fs.readFile(filePath, 'utf8');
-    const geojson = JSON.parse(raw);
+    const { features, header } = parseGeoFile(raw, filePath);
 
     let linkedCount = 0;
     let hasModels = false;
     let hasPcs = false;
-    geojson.features = geojson.features.map((feature) => {
+    const updated = features.map((feature) => {
       if (!feature.properties) feature.properties = {};
       const fid = feature.properties._featureId;
       if (fid && Object.prototype.hasOwnProperty.call(assignments, fid)) {
@@ -756,12 +789,13 @@ app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req,
       return feature;
     });
 
-    // Keep _metadata in sync so the client can detect 3D capability on reload
-    if (!geojson._metadata) geojson._metadata = {};
-    geojson._metadata.has3DModels   = hasModels;
-    geojson._metadata.hasPointClouds = hasPcs;
+    // Keep metadata in sync so the client can detect 3D capability on reload
+    const md = header._metadata ?? {};
+    md.has3DModels    = hasModels;
+    md.hasPointClouds = hasPcs;
+    header._metadata  = md;
 
-    await fs.writeFile(filePath, JSON.stringify(geojson), 'utf8');
+    await fs.writeFile(filePath, serializeGeoFile(updated, header, filePath), 'utf8');
     logger.info(`Layer link: ${id} — ${linkedCount} feature(s) with assets`);
     res.json({ success: true, layerId: id, linkedCount });
   } catch (err) {
@@ -780,8 +814,8 @@ app.post('/admin/manual-link', requireAdminAuth, async (req, res) => {
   if (!filename || typeof filename !== 'string') {
     return res.status(400).json({ error: 'filename is required.' });
   }
-  if (!filename.endsWith('.geojson')) {
-    return res.status(400).json({ error: 'Only .geojson files can be linked.' });
+  if (!filename.endsWith('.geojson') && !filename.endsWith('.geojsonl')) {
+    return res.status(400).json({ error: 'Only .geojson/.geojsonl files can be linked.' });
   }
   if (!assignments || typeof assignments !== 'object' || Array.isArray(assignments)) {
     return res.status(400).json({ error: 'assignments must be a plain object.' });
@@ -844,8 +878,8 @@ app.post('/admin/relink', requireAdminAuth, async (req, res) => {
     validateLayerId(layerId);
     const meta = await readLayerMeta(layersDir, layerId);
     if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Only GeoJSON layers can be re-linked.' });
-    const ext     = meta.extension || '.geojson';
-    const filePath = path.join(layersDir, layerId, `${layerId}${ext}`);
+    const ext     = safeLayerExt(meta.extension || '.geojson');
+    const filePath = resolveInDir(layersDir, layerId, `${layerId}${ext}`);
     const result  = await relinkGeojson(filePath, layersDir);
     logger.info(`Re-linked layer ${layerId}: ${result.linkedCount} feature(s) linked`);
     res.json(result);
@@ -864,7 +898,7 @@ app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
         if (!/^[a-zA-Z0-9._-]+$/.test(meta.originalBackup)) {
       return res.status(500).json({ error: 'Invalid backup filename in layer metadata.' });
     }
-    const backupPath = path.join(layersDir, req.params.id, meta.originalBackup);
+    const backupPath = resolveInDir(layersDir, req.params.id, path.basename(meta.originalBackup));
     res.download(backupPath, meta.originalName);
   } catch (err) {
     if (err.message.includes('not found')) return res.status(404).json({ error: err.message });

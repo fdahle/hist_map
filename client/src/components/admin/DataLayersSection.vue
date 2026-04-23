@@ -117,11 +117,9 @@
             <template v-else-if="layer.status === 'error'">
               <span class="status-text status-error" :title="layer.processingLog?.at(-1) ?? 'Processing error'">⚠ Error</span>
             </template>
-            <template v-else-if="layer.optimized">
-              <span class="status-text status-ok">✓ Optimized</span>
-            </template>
-            <template v-else-if="layer.fileType === 'geojson' && layer.processingLog?.some(s => s.includes('Simplified'))">
-              <span class="status-text status-ok">✓ Simplified</span>
+            <template v-else>
+              <span v-if="layer.optimized" class="status-text status-ok">✓ Optimized</span>
+              <span v-if="layer.fileType === 'geojson' && layer.processingLog?.some(s => s.includes('Simplified'))" class="status-text status-ok">✓ Simplified</span>
             </template>
           </div>
 
@@ -287,15 +285,6 @@
             <div class="edit-section-heading">Style</div>
             <div class="edit-row">
               <div class="edit-field">
-                <label>Badge color</label>
-                <div class="color-row">
-                  <input type="color" class="color-swatch"
-                    :value="/^#[0-9a-f]{6}$/i.test(editDraft.color) ? editDraft.color : '#0088ff'"
-                    @input="editDraft.color = $event.target.value" />
-                  <input v-model="editDraft.color" type="text" placeholder="#0088ff" />
-                </div>
-              </div>
-              <div class="edit-field">
                 <label>Stroke color</label>
                 <div class="color-row">
                   <input type="color" class="color-swatch"
@@ -305,14 +294,21 @@
                 </div>
               </div>
               <div class="edit-field">
-                <label>Fill color</label>
+                <label>Fill color <FieldHint text="'auto' = stroke color at 50% opacity · 'none' = transparent · or a hex color like #ff0000" /></label>
                 <div class="color-row">
                   <input type="color" class="color-swatch"
-                    :value="/^#[0-9a-f]{6}$/i.test(editDraft.fill_color) ? editDraft.fill_color : '#000000'"
+                    :value="fillSwatchColor(editDraft.fill_color, editDraft.stroke_color)"
+                    :disabled="!fillIsHex(editDraft.fill_color)"
                     @input="editDraft.fill_color = $event.target.value" />
-                  <input v-model="editDraft.fill_color" type="text" placeholder="none" />
+                  <input
+                    v-model="editDraft.fill_color"
+                    type="text"
+                    placeholder="auto / none / #0088ff"
+                    @blur="editDraft.fill_color = normalizeFillColor(editDraft.fill_color)" />
                 </div>
               </div>
+            </div>
+            <div v-if="layer.geometryType === 'Point'" class="edit-row">
               <div class="edit-field">
                 <label>Point type</label>
                 <select v-model="editDraft.pointType">
@@ -375,6 +371,27 @@
                       class="thumb-field-chip"
                       :title="'Insert $<' + col + '>'"
                       @click="editDraft.thumbnail_url += '$<' + col + '>'"
+                    >{{ col }}</span>
+                  </template>
+                </span>
+              </div>
+            </div>
+
+            <!-- Download URL -->
+            <div class="edit-section-heading">Download</div>
+            <div class="edit-row">
+              <div class="edit-field edit-field-grow">
+                <label>Download URL <span class="edit-field-hint">(use <code>$&lt;fieldname&gt;</code> or <code>$&lt;fieldname:start:end&gt;</code> for substrings)</span></label>
+                <input v-model="editDraft.download_url" type="text" placeholder="https://example.com/$<id>.zip" />
+                <span class="edit-field-hint" style="display:block;margin-top:3px">
+                  Embed feature fields with <code>$&lt;fieldname&gt;</code>.
+                  <template v-if="dataPreview && dataPreview.columns.length">
+                    Available: <span
+                      v-for="col in dataPreview.columns"
+                      :key="col"
+                      class="thumb-field-chip"
+                      :title="'Insert $<' + col + '>'"
+                      @click="editDraft.download_url += '$<' + col + '>'"
                     >{{ col }}</span>
                   </template>
                 </span>
@@ -487,6 +504,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { getApiUrl } from '../../utils/config';
 import UploadSettingsModal from '../modals/admin/UploadSettingsModal.vue';
+import FieldHint from '../ui/FieldHint.vue';
 import LinkingModal from '../modals/admin/LinkingModal.vue';
 import LinkDataModal from '../modals/admin/LinkDataModal.vue';
 
@@ -604,6 +622,7 @@ function applyPatchToLayerConfig(lc, patch) {
   if ('stroke_color'   in patch) lc.stroke_color   = patch.stroke_color;
   if ('fill_color'     in patch) lc.fill_color     = patch.fill_color;
   if ('thumbnail_url'  in patch) lc.thumbnail_url  = patch.thumbnail_url || null;
+  if ('download_url'   in patch) lc.download_url   = patch.download_url  || null;
   if ('pointType'      in patch) lc.pointType      = patch.pointType || null;
   if ('attribution'    in patch) lc.attribution    = patch.attribution;
   if ('search_fields'  in patch) lc.search_fields  = patch.search_fields;
@@ -709,7 +728,7 @@ function metaToEntry(meta) {
     visible: lc.visible ?? true,
     order:   lc.order   ?? 0,
   };
-  const extras = ['color', 'stroke_color', 'fill_color', 'attribution', 'tileSize', 'search_fields', 'thumbnail_url'];
+  const extras = ['color', 'stroke_color', 'fill_color', 'attribution', 'tileSize', 'search_fields', 'thumbnail_url', 'download_url', 'pointType'];
   for (const k of extras) {
     if (lc[k] != null) entry[k] = lc[k];
   }
@@ -746,11 +765,11 @@ function emitLayers() {
           displayName:  d.displayName  ?? lc.displayName,
           visible:      d.visible      ?? lc.visible,
           order:        d.order        ?? lc.order,
-          color:        d.color        || lc.color,
           stroke_color: d.stroke_color || lc.stroke_color,
           fill_color:   d.fill_color   || lc.fill_color,
           attribution:  d.attribution  || lc.attribution,
           thumbnail_url: d.thumbnail_url !== undefined ? (d.thumbnail_url || null) : lc.thumbnail_url,
+          download_url:  d.download_url  !== undefined ? (d.download_url  || null) : lc.download_url,
           pointType:     d.pointType !== undefined ? (d.pointType || null) : lc.pointType,
           search_fields: searchFieldsStr.value
             .split(',').map(s => s.trim()).filter(Boolean),
@@ -1026,11 +1045,11 @@ function toggleEdit(layer) {
     visible:      lc.visible      ?? true,
     order:        lc.order        ?? 0,
     // GeoJSON extras
-    color:        lc.color        ?? '',
     stroke_color: lc.stroke_color ?? '',
-    fill_color:   lc.fill_color   ?? '',
+    fill_color:   normalizeFillColor(lc.fill_color ?? ''),
     pointType:    lc.pointType    ?? '',
     thumbnail_url: lc.thumbnail_url ?? '',
+    download_url:  lc.download_url  ?? '',
     // GeoTIFF extras
     opacity:      lc.opacity      ?? null,
     noDataValue:  lc.noDataValue  ?? null,
@@ -1102,6 +1121,26 @@ async function toggleDataPreview(layerId) {
   }
 }
 
+const HEX6 = /^#[0-9a-f]{6}$/i;
+
+function fillIsHex(val) {
+  return HEX6.test(val);
+}
+
+function fillSwatchColor(fillColor, strokeColor) {
+  if (HEX6.test(fillColor)) return fillColor;
+  if (HEX6.test(strokeColor)) return strokeColor;
+  return '#0088ff';
+}
+
+function normalizeFillColor(val) {
+  const v = (val ?? '').trim();
+  if (!v || v === 'auto' || v === 'automatic') return 'auto';
+  if (v === 'none') return 'none';
+  if (HEX6.test(v)) return v.toLowerCase();
+  return 'auto';
+}
+
 function saveEdit(id, { closePanel = false } = {}) {
   editError.value = '';
 
@@ -1113,6 +1152,7 @@ function saveEdit(id, { closePanel = false } = {}) {
   );
   patch.search_fields = parsedSearchFields;
   patch.thumbnail_url = editDraft.value.thumbnail_url ?? '';
+  patch.download_url  = editDraft.value.download_url  ?? '';
   patch.pointType = editDraft.value.pointType || null;
   const layer = layers.value.find(l => l.id === id);
   const crsVal = editDraft.value.crsOverride?.trim() || null;
@@ -1235,6 +1275,7 @@ function saveEdit(id, { closePanel = false } = {}) {
   font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   padding: 0.15rem 0.5rem; border-radius: 4px;
   background: var(--admin-bg, #f3f4f6); color: var(--admin-muted, #777);
+  min-width: 84px; text-align: center; box-sizing: border-box;
 }
 .type-geojson    { background: rgba(34,197,94,0.15);  color: #15803d; }
 .type-geotiff    { background: rgba(168,85,247,0.15); color: #6d28d9; }
