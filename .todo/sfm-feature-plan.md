@@ -4,70 +4,10 @@
 Stratum3D is a SfM results sharing platform with solid foundations (2D map, 3D viewer, admin panel,
 elevation profiles, measurement). The following features are the SfM-specific gaps most valuable to fill:
 
-1. **Volume Calculation** — cut/fill from DEMs (entirely new capability)
 2. **Contour Lines** — generate contour GeoJSON from a GeoTIFF DEM via GDAL
 3. **Hillshade** — generate hillshade GeoTIFF overlay via GDAL
 4. **Camera Positions Layer** — render CSV/GeoJSON camera points with a camera icon
 5. **GCP Display with Residuals** — color-by-property gradient styling for accuracy visualization
-
----
-
-## Feature 1: Volume Calculation
-
-### What it does
-User draws a polygon on the map over a DEM layer → enters a baseline elevation → composable
-samples all DEM pixels inside the polygon and sums `(elevation − baseline) × cellArea`.
-Result: cut volume (below baseline), fill volume (above baseline), net.
-
-### New files
-- `client/src/composables/useVolumeCalculation.js`
-- `client/src/components/modals/VolumeModal.vue`
-
-### Files to modify
-| File | Change |
-|---|---|
-| `client/src/components/map/MapRibbonMenu.vue` | Add "Volume" button in the Analyse group (Tools tab), emit `'volume-calc'` |
-| `client/src/views/MapView.vue` | Import composable + modal, wire up event |
-
-### Algorithm (useVolumeCalculation.js)
-
-```javascript
-// Mirrors useElevationProfile.js structure
-async function computeVolume(layerId, polygonGeom, baselineElevation) {
-  const layerObj = layerStore.getLayerById(layerId);
-  // 1. Load tiff (fromBlob or fromUrl — same as elevation profile)
-  // 2. Determine polygon bbox in TIFF CRS via olTransform
-  // 3. readRasters for that window (capped at 2048x2048)
-  // 4. Calculate pixel cell area:
-  //      xRes = (extent[2] - extent[0]) / imageWidth   (TIFF CRS units)
-  //      yRes = (extent[3] - extent[1]) / imageHeight
-  //      cellArea = xRes * yRes   (m² when in a metric CRS)
-  // 5. For each pixel (i,j):
-  //      coord = [extent[0] + (i+0.5)*xRes, extent[1] + (j+0.5)*yRes]
-  //      if polygonGeom.intersectsCoordinate(transformedCoord):
-  //        elevation = raster[j*width + i]
-  //        if elevation !== noData:
-  //          delta = elevation - baseline
-  //          delta > 0 → fillVolume += delta * cellArea
-  //          delta < 0 → cutVolume += abs(delta) * cellArea
-  // 6. Return { cutVolume, fillVolume, netVolume, cellCount, area }
-}
-```
-
-Key reuse: `fromBlob`/`fromUrl` from `geotiff` (same import as useElevationProfile.js),
-`olTransform` from `ol/proj`, nodata handling pattern from `useElevationProfile.js`.
-
-### Baseline options in the modal
-- Auto (mean elevation inside polygon)
-- Auto (min elevation inside polygon)
-- Custom (user types a number)
-
-### VolumeModal.vue structure
-- DEM layer selector (same filter as ElevationModal: `type === 'geotiff' && bands === 1`)
-- "Draw polygon" toggle button (like the elevation draw button)
-- Baseline input (radio: mean / min / custom + number input)
-- Results: Cut Vol / Fill Vol / Net / Sampled Area (all in m³ / m²)
-- Uses `useModalDrag` for draggability
 
 ---
 

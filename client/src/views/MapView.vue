@@ -5,11 +5,13 @@
       :is-measuring-distance="isMeasurementModalVisible && activeMeasurementType === 'distance'"
       :is-measuring-area="isMeasurementModalVisible && activeMeasurementType === 'area'"
       :is-elevation-open="isElevationModalVisible"
+      :is-volume-open="isVolumeModalVisible"
       :is-pins-open="isPinsOpen"
       @add-files="handleRibbonFiles"
       @measure-distance="onMeasureDistance"
       @measure-area="onMeasureArea"
       @elevation-profile="onElevationProfile"
+      @volume-calc="onVolumeCalc"
       @share-scene="isShareSceneOpen = true"
       @extended-search="onExtendedSearch"
       @toggle-pins="onTogglePins"
@@ -121,6 +123,17 @@
       @reset-profile="onResetElevationProfile"
     />
 
+    <VolumeModal
+      :is-visible="isVolumeModalVisible"
+      :is-drawing="isVolumeDrawing"
+      :is-loading="isVolumeLoading"
+      :volume-data="volumeResult"
+      @close="closeVolumeModal"
+      @toggle-draw="onToggleVolumeDraw"
+      @finish-draw="onFinishVolumeDraw"
+      @reset-result="onResetVolumeResult"
+    />
+
     <CsvColumnPickerModal
       :is-open="csvModalOpen"
       :file-name="csvModalFileName"
@@ -149,6 +162,7 @@ import LayerPanel from '../components/map/LayerPanel.vue';
 import MapRibbonMenu from '../components/map/MapRibbonMenu.vue';
 import MeasurementModal from '../components/modals/MeasurementModal.vue';
 import ElevationModal from '../components/modals/ElevationModal.vue';
+import VolumeModal from '../components/modals/VolumeModal.vue';
 import ShareSceneModal from '../components/modals/ShareSceneModal.vue';
 import ExtendedSearchModal from '../components/modals/ExtendedSearchModal.vue';
 import SettingsModal from '../components/modals/SettingsModal.vue';
@@ -158,6 +172,7 @@ import BugReportButton from '../components/common/BugReportButton.vue';
 import MapBookmarksModal from '../components/modals/MapBookmarksModal.vue';
 import { useMeasurementMode } from '../composables/useMeasurementMode';
 import { useElevationProfile } from '../composables/useElevationProfile';
+import { useVolumeCalculation } from '../composables/useVolumeCalculation';
 import { useFileDropHandler } from '../composables/useFileDropHandler';
 
 const settingsStore = useSettingsStore();
@@ -214,6 +229,12 @@ const {
 } = useElevationProfile(mapStore, layerStore, layerManagerRef);
 
 const {
+  isVolumeModalVisible, isVolumeDrawing, isVolumeLoading, volumeResult,
+  openVolumeModal, closeVolumeModal,
+  onResetVolumeResult, onToggleVolumeDraw, onFinishVolumeDraw,
+} = useVolumeCalculation(mapStore, layerStore, layerManagerRef);
+
+const {
   isDragging, notification,
   csvModalOpen, csvModalFileName, csvModalColumns, csvModalSampleRows, csvModalPreX, csvModalPreY,
   handleDragOver, handleDragLeave, handleDrop, handleRibbonFiles,
@@ -226,6 +247,7 @@ const {
 const closeAllTools = () => {
   if (isMeasurementModalVisible.value) closeMeasurementModal();
   if (isElevationModalVisible.value) closeElevationModal();
+  if (isVolumeModalVisible.value) closeVolumeModal();
   if (isPinsOpen.value) isPinsOpen.value = false;
 };
 
@@ -256,6 +278,16 @@ const onElevationProfile = () => {
     closeAllTools();
     layerManagerRef.value?.setSelectionActive(false);
     openElevationModal();
+  }
+};
+
+const onVolumeCalc = () => {
+  if (isVolumeModalVisible.value) {
+    closeVolumeModal();
+  } else {
+    closeAllTools();
+    layerManagerRef.value?.setSelectionActive(false);
+    openVolumeModal();
   }
 };
 

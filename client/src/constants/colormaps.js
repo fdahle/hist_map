@@ -83,6 +83,18 @@ export const COLORMAPS = [
       [1,    0.271, 0.459, 0.706],
     ],
   },
+  {
+    id: 'rdylgn',
+    label: 'RdYlGn',
+    gradient: 'linear-gradient(to right, #d73027, #fc8d59, #ffffbf, #91cf60, #1a9850)',
+    stops: [
+      [0,    0.843, 0.188, 0.153],
+      [0.25, 0.988, 0.553, 0.349],
+      [0.5,  1.000, 1.000, 0.749],
+      [0.75, 0.569, 0.812, 0.376],
+      [1,    0.102, 0.596, 0.314],
+    ],
+  },
 ];
 
 // Quick lookup by id

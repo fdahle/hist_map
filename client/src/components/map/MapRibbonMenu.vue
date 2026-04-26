@@ -157,6 +157,15 @@
               <span class="btn-icon" v-html="ICON_ELEVATION"></span>
               <span class="btn-label">Elevation</span>
             </button>
+            <button
+              class="ribbon-btn"
+              :class="{ active: isVolumeOpen }"
+              @click="$emit('volume-calc')"
+              title="Calculate cut/fill volume from a DEM"
+            >
+              <span class="btn-icon" v-html="ICON_VOLUME"></span>
+              <span class="btn-label">Volume</span>
+            </button>
           </div>
           <span class="group-label">Analyse</span>
         </div>
@@ -412,7 +421,7 @@ import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
 import { usePinStore } from '@/stores/map/pinStore';
 import { LAYER_STATUS } from '@/constants/layerConstants.js';
-import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_3D, ICON_SHARE, ICON_INFO, ICON_SAVE_IMAGE, ICON_BOOKMARK_ADD } from '@/constants/icons.js';
+import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_VOLUME, ICON_3D, ICON_SHARE, ICON_INFO, ICON_SAVE_IMAGE, ICON_BOOKMARK_ADD } from '@/constants/icons';
 import { COLORMAPS } from '@/constants/colormaps.js';
 import LayerInfoModal from '../modals/LayerInfoModal.vue';
 import ExportErrorModal from '../modals/ExportErrorModal.vue';
@@ -422,11 +431,12 @@ const props = defineProps({
   isMeasuringDistance: { type: Boolean, default: false },
   isMeasuringArea:     { type: Boolean, default: false },
   isElevationOpen:     { type: Boolean, default: false },
+  isVolumeOpen:        { type: Boolean, default: false },
   isPinsOpen:          { type: Boolean, default: false },
   isBookmarksOpen:     { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile', 'share-scene', 'extended-search', 'toggle-pins', 'toggle-bookmarks']);
+const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile', 'volume-calc', 'share-scene', 'extended-search', 'toggle-pins', 'toggle-bookmarks']);
 
 const settingsStore = useSettingsStore();
 const mapStore = useMapStore();

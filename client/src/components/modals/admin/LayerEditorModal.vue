@@ -223,6 +223,44 @@
               <label>Search Fields<FieldHint text="Feature property names that users can search through in the search bar." /><span class="hint"> comma-separated</span></label>
               <input v-model="searchFieldsStr" type="text" placeholder="id, name" @blur="parseSearchFields" />
             </div>
+            <div class="field-group field-toggle-row">
+              <label>Color by property<FieldHint text="Color points along a gradient based on a numeric feature property (e.g. GCP residual error)." /></label>
+              <div class="toggle-switch">
+                <input :id="`cb-${uid}`" v-model="colorByEnabled" type="checkbox" />
+                <label :for="`cb-${uid}`" class="slider"></label>
+              </div>
+            </div>
+            <template v-if="colorByEnabled && draft.color_by">
+              <div class="field-row">
+                <div class="field-group">
+                  <label>Property name</label>
+                  <input v-model="draft.color_by.property" type="text" placeholder="residual_m" />
+                </div>
+                <div class="field-group">
+                  <label>Color ramp</label>
+                  <select v-model="draft.color_by.colormap">
+                    <option v-for="cm in COLORMAPS" :key="cm.id" :value="cm.id">{{ cm.label }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field-row">
+                <div class="field-group">
+                  <label>Min value</label>
+                  <input v-model.number="draft.color_by.min" type="number" step="any" placeholder="0" />
+                </div>
+                <div class="field-group">
+                  <label>Max value</label>
+                  <input v-model.number="draft.color_by.max" type="number" step="any" placeholder="0.1" />
+                </div>
+              </div>
+              <div class="field-group field-toggle-row">
+                <label>Invert color ramp</label>
+                <div class="toggle-switch">
+                  <input :id="`cb-inv-${uid}`" v-model="draft.color_by.inverted" type="checkbox" />
+                  <label :for="`cb-inv-${uid}`" class="slider"></label>
+                </div>
+              </div>
+            </template>
           </template>
 
           <!-- ── geotiff fields ───────────────────────────────── -->
@@ -274,6 +312,7 @@
 import { ref, computed, watch } from 'vue';
 import FieldHint from '../../ui/FieldHint.vue';
 import { getApiUrl } from '../../../utils/config';
+import { COLORMAPS } from '../../../constants/colormaps';
 
 const props = defineProps({
   isOpen: Boolean,
@@ -351,7 +390,7 @@ function blankDraft() {
     tileSize: null,
     // geojson
     stroke_color: '#3b82f6', fill_color: 'auto',
-    render_mode: '', pointType: '', group_by: '', search_fields: [],
+    render_mode: '', pointType: '', group_by: '', search_fields: [], color_by: null,
     // geotiff
     opacity: null, noDataValue: null, normalize: false, overviews: false,
     // shared crs_options
@@ -431,6 +470,18 @@ function normalizeFillColor(val) {
   return 'auto';
 }
 
+// ── Color by property ─────────────────────────────────────────
+const colorByEnabled = computed({
+  get: () => !!draft.value.color_by,
+  set: (val) => {
+    if (val && !draft.value.color_by) {
+      draft.value.color_by = { property: '', min: 0, max: 0.1, colormap: 'rdylgn', inverted: false };
+    } else if (!val) {
+      draft.value.color_by = null;
+    }
+  },
+});
+
 // ── Validation & save ──────────────────────────────────────────
 function validate() {
   const d = draft.value;
@@ -491,6 +542,15 @@ function save() {
     if (d.pointType?.trim())    out.pointType    = d.pointType.trim();
     if (d.group_by?.trim())     out.group_by     = d.group_by.trim();
     if (d.search_fields?.length) out.search_fields = d.search_fields;
+    if (d.color_by?.property?.trim()) {
+      out.color_by = {
+        property: d.color_by.property.trim(),
+        min: d.color_by.min ?? 0,
+        max: d.color_by.max ?? 0.1,
+        colormap: d.color_by.colormap || 'rdylgn',
+        inverted: !!d.color_by.inverted,
+      };
+    }
   }
 
   if (d.type === 'geotiff') {

@@ -11,6 +11,7 @@ import {
 } from "../constants/layerConstants";
 
 import { getMapPinIcon, getCameraMapIcon, getCrosshairMapIcon } from "../constants/icons";
+import { COLORMAP_MAP } from "../constants/colormaps";
 
 /**
  * Create a pin/marker style from an SVG
@@ -280,5 +281,65 @@ export function buildGroupByStyleFunction(layerId, layerStore) {
     if (!group.visible) return null;
 
     return createVectorStyle(group.color, layerObj.fillColor);
+  };
+}
+
+/**
+ * Interpolate a hex color from a named colormap at position t (0–1).
+ * @param {number} t - Normalized position (0–1)
+ * @param {string} [colormapId] - Colormap id from COLORMAPS (defaults to 'rdylgn')
+ * @returns {string} Hex color string
+ */
+export function interpolateColorRamp(t, colormapId = 'rdylgn') {
+  const def = COLORMAP_MAP[colormapId] || COLORMAP_MAP['rdylgn'];
+  const stops = def.stops;
+  t = Math.max(0, Math.min(1, t));
+
+  let lo = stops[0];
+  let hi = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i][0] && t <= stops[i + 1][0]) {
+      lo = stops[i];
+      hi = stops[i + 1];
+      break;
+    }
+  }
+
+  const range = hi[0] - lo[0];
+  const f = range === 0 ? 0 : (t - lo[0]) / range;
+  const r = Math.round((lo[1] + f * (hi[1] - lo[1])) * 255);
+  const g = Math.round((lo[2] + f * (hi[2] - lo[2])) * 255);
+  const b = Math.round((lo[3] + f * (hi[3] - lo[3])) * 255);
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+/**
+ * Build a per-feature style function that colors points along a gradient
+ * based on a numeric feature property (e.g. GCP residual error).
+ *
+ * @param {{ property: string, min: number, max: number, colormap: string, inverted: boolean }} colorBy
+ * @param {string|null} [pointType] - Point marker type (same options as buildLayerSharedStyle)
+ * @returns {(feature: import('ol/Feature').default) => import('ol/style/Style').default}
+ */
+export function buildColorByStyleFunction(colorBy, pointType = null) {
+  return (feature) => {
+    const geomType = feature.getGeometry()?.getType();
+    const isPoint = geomType === GEOMETRY_TYPE.POINT || geomType === GEOMETRY_TYPE.MULTI_POINT;
+
+    const val = Number(feature.get(colorBy.property));
+    if (isNaN(val)) {
+      return isPoint ? createPinStyle('#888888') : createVectorStyle('#888888');
+    }
+
+    const t = Math.max(0, Math.min(1, (val - colorBy.min) / (colorBy.max - colorBy.min)));
+    const normalized = colorBy.inverted ? 1 - t : t;
+    const hex = interpolateColorRamp(normalized, colorBy.colormap);
+
+    if (!isPoint) return createVectorStyle(hex, null);
+    if (pointType === 'camera')    return createCameraStyle(hex);
+    if (pointType === 'crosshair') return createCrosshairStyle(hex);
+    if (pointType === 'circle')    return createCircleStyle(hex);
+    if (pointType === 'square')    return createSquareStyle(hex);
+    return createPinStyle(hex);
   };
 }

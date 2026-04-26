@@ -144,7 +144,7 @@ const zoomToPin = (pin) => {
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 900;
+  z-index: 4000;
   background: #fff;
   border: 1px solid #d1d5db;
   border-radius: 8px;

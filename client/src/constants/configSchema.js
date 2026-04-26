@@ -46,7 +46,7 @@ export const CONFIG_SCHEMA = {
     },
     geojson: {
       required: ["url"],
-      optional: ["color", "stroke_color", "fill_color", "render_mode", "search_fields", "pointType", "group_by"],
+      optional: ["color", "stroke_color", "fill_color", "render_mode", "search_fields", "pointType", "group_by", "color_by"],
     },
     geotiff: {
       required: ["url"],

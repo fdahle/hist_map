@@ -8,6 +8,7 @@ import { logger } from "../utils/logger";
 import {
   buildLayerSharedStyle,
   buildGroupByStyleFunction,
+  buildColorByStyleFunction,
 } from "../utils/styleFactory";
 import {
   Z_INDEX,
@@ -148,7 +149,9 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
           const LayerClass = layer.renderMode === "image" ? VectorImageLayer : VectorLayer;
           const layerStyle = layer.groupBy
             ? buildGroupByStyleFunction(layer._layerId, layerStore)
-            : sharedStyle;
+            : layer.color_by
+              ? buildColorByStyleFunction(layer.color_by, layer.pointType ?? null)
+              : sharedStyle;
 
           olLayer = new LayerClass({
             source,

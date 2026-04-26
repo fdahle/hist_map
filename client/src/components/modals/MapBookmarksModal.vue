@@ -140,7 +140,7 @@ const { modalStyle, startDrag } = useModalDrag(modalRef, { initialX: window.inne
   font-family: 'Segoe UI', sans-serif;
   display: flex;
   flex-direction: column;
-  z-index: 1500;
+  z-index: 4000;
   backdrop-filter: blur(10px);
 }
 

@@ -424,7 +424,7 @@ const onChartMouseLeave = () => {
   font-family: 'Segoe UI', sans-serif;
   display: flex;
   flex-direction: column;
-  z-index: 1000;
+  z-index: 4000;
   backdrop-filter: blur(10px);
   --chart-color: #4a9eff;
 }

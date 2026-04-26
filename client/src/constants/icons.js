@@ -184,6 +184,9 @@ export const ICON_PACKAGE = `<svg viewBox="0 0 24 24" width="16" height="16" fil
 /** Elevation profile (mountain silhouette with baseline) */
 export const ICON_ELEVATION = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 7 10 11 14 15 7 21 17"/><line x1="3" y1="20" x2="21" y2="20"/></svg>`;
 
+/** Volume calculation (stacked layers / cut-fill) */
+export const ICON_VOLUME = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 8l10 5 10-5-10-5z"/><path d="M2 16l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+
 /** 3D cube / 3D viewer */
 export const ICON_3D = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z"/><path d="M12 22V11"/><path d="M20 6.5L12 11 4 6.5"/></svg>`;
 
