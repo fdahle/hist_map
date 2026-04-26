@@ -149,8 +149,8 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
           const LayerClass = layer.renderMode === "image" ? VectorImageLayer : VectorLayer;
           const layerStyle = layer.groupBy
             ? buildGroupByStyleFunction(layer._layerId, layerStore)
-            : layer.color_by
-              ? buildColorByStyleFunction(layer.color_by, layer.pointType ?? null)
+            : layer.colorBy
+              ? buildColorByStyleFunction(layer.colorBy, layer.pointType ?? null)
               : sharedStyle;
 
           olLayer = new LayerClass({

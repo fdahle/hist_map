@@ -56,6 +56,7 @@ export const useLayerStore = defineStore("layers", () => {
     sourceCrs = null,
     thumbnailUrl = null,
     downloadUrl = null,
+    colorBy = null,
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
@@ -114,6 +115,7 @@ export const useLayerStore = defineStore("layers", () => {
       sourceCrs,
       thumbnailUrl,
       downloadUrl,
+      colorBy,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.
@@ -261,6 +263,8 @@ export const useLayerStore = defineStore("layers", () => {
     const layerObj = layerIndex.get(layerId);
     if (!layerObj) return;
     layerObj.color = newColor;
+    layerObj.strokeColor = newColor;
+    layerObj.fillColor = null;
   };
 
   // Updates the stored colormap for a raster layer.
@@ -269,6 +273,12 @@ export const useLayerStore = defineStore("layers", () => {
     const layerObj = layerIndex.get(layerId);
     if (!layerObj) return;
     layerObj.colormap = colormapId;
+  };
+
+  const setLayerColorBy = (layerId, colorBy) => {
+    const layerObj = layerIndex.get(layerId);
+    if (!layerObj) return;
+    layerObj.colorBy = colorBy;
   };
 
   const updateLayerColormapInverted = (layerId, inverted) => {
@@ -437,6 +447,7 @@ export const useLayerStore = defineStore("layers", () => {
     updateLayerColor,
     updateLayerColormap,
     updateLayerColormapInverted,
+    setLayerColorBy,
     retryLayer,
     cancelLayerLoad,
     registerCancelHandler,

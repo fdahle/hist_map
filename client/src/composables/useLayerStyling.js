@@ -1,4 +1,4 @@
-import { buildLayerSharedStyle } from "../utils/styleFactory";
+import { buildLayerSharedStyle, buildColorByStyleFunction } from "../utils/styleFactory";
 import { buildColormapStyle } from "../utils/layerFactory";
 
 export function useLayerStyling(layerStore, getSelectInteraction) {
@@ -6,9 +6,9 @@ export function useLayerStyling(layerStore, getSelectInteraction) {
     const layerObj = layerStore.getLayerById(layerId);
     if (!layerObj || !layerObj.layerInstance) return;
 
-    // For grouped layers the style function already reads from the store;
+    // For grouped/colorBy layers the style function already reads from the store;
     // just force OL to re-render the image tile.
-    if (layerObj.groupBy) {
+    if (layerObj.groupBy || layerObj.colorBy) {
       layerObj.layerInstance.changed();
       return;
     }
@@ -48,10 +48,40 @@ export function useLayerStyling(layerStore, getSelectInteraction) {
     layerObj.layerInstance.setStyle(newStyle);
   };
 
+  const applyLayerColorBy = (layerId) => {
+    const layerObj = layerStore.getLayerById(layerId);
+    if (!layerObj?.layerInstance) return;
+    if (layerObj.colorBy) {
+      layerObj.layerInstance.setStyle(
+        buildColorByStyleFunction(layerObj.colorBy, layerObj.pointType ?? null)
+      );
+    } else {
+      const newStyle = buildLayerSharedStyle(
+        layerObj.color,
+        layerObj.strokeColor ?? null,
+        layerObj.fillColor ?? null,
+        layerObj.geometryType,
+        layerObj.pointType ?? null,
+      );
+      layerObj.layerInstance.setStyle(newStyle);
+      const source = layerObj.layerInstance.getSource?.();
+      if (source) {
+        const selectInteraction = getSelectInteraction();
+        const selectedIds = selectInteraction
+          ? new Set(selectInteraction.getFeatures().getArray().map(f => f.getId()))
+          : new Set();
+        source.getFeatures().forEach(f => {
+          if (!selectedIds.has(f.getId())) f.setStyle(null);
+        });
+      }
+    }
+    layerObj.layerInstance.changed();
+  };
+
   const applySubCategories = (layerId) => {
     const layerObj = layerStore.getLayerById(layerId);
     if (layerObj?.layerInstance) layerObj.layerInstance.changed();
   };
 
-  return { applyLayerColor, applyLayerColormap, applySubCategories };
+  return { applyLayerColor, applyLayerColormap, applyLayerColorBy, applySubCategories };
 }

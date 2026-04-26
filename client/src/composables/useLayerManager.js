@@ -35,7 +35,7 @@ export function useLayerManager(map) {
   const { scanAndApplyGeoTIFF } = useGeoTIFFLoader(map, layerStore);
   const { loadGeoJsonLayer } = useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex);
   const { setupSelection, setSelectionActive, getSelectInteraction, cleanupSelection } = useMapSelection(map, layerStore, selectionStore);
-  const { applyLayerColor, applyLayerColormap, applySubCategories } = useLayerStyling(layerStore, getSelectInteraction);
+  const { applyLayerColor, applyLayerColormap, applyLayerColorBy, applySubCategories } = useLayerStyling(layerStore, getSelectInteraction);
 
   // ---------------------------------------------------------------------------
   // Register the cancel handler so the store can terminate workers.
@@ -197,6 +197,7 @@ export function useLayerManager(map) {
     cleanup,
     applyLayerColor,
     applyLayerColormap,
+    applyLayerColorBy,
     applySubCategories,
     searchIndex,
     setupSelection,

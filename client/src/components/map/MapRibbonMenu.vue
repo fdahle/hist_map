@@ -308,6 +308,81 @@
           <span class="group-label">Color</span>
         </div>
 
+        <!-- Color By attribute – GeoJSON / vector layers only -->
+        <div v-if="selectedLayer.type !== 'geotiff'" class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <div class="ctx-colorby-control" ref="colorByControlRef">
+              <button
+                class="ribbon-btn"
+                :class="{ active: !!selectedLayer.colorBy }"
+                @click.stop="toggleColorByPanel"
+                title="Color features by a numeric attribute"
+              >
+                <span class="btn-icon" v-html="ICON_COLOR_BY"></span>
+                <span class="btn-label">Color By</span>
+              </button>
+              <div v-if="colorByPanelOpen" class="ctx-colorby-panel" @click.stop>
+                <div class="ctx-colorby-row">
+                  <span class="ctx-colorby-label">Attribute</span>
+                  <select v-model="colorByDraft.property" class="ctx-colorby-select">
+                    <option value="">— select —</option>
+                    <option v-for="p in availableNumericProps" :key="p" :value="p">{{ p }}</option>
+                  </select>
+                </div>
+                <div class="ctx-colorby-row">
+                  <span class="ctx-colorby-label">Range</span>
+                  <div class="ctx-colorby-range-row">
+                    <input type="number" v-model.number="colorByDraft.min" class="ctx-colorby-num" placeholder="Min" step="any" />
+                    <span class="ctx-colorby-sep">–</span>
+                    <input type="number" v-model.number="colorByDraft.max" class="ctx-colorby-num" placeholder="Max" step="any" />
+                    <button class="ctx-colorby-auto-btn" @click="autoDetectRange" :disabled="!colorByDraft.property" title="Auto-detect min/max from loaded features">Auto</button>
+                  </div>
+                </div>
+                <div class="ctx-colorby-row">
+                  <span class="ctx-colorby-label">Colormap</span>
+                  <div class="ctx-colorby-cm-row">
+                    <div class="ctx-colorby-cm-wrap" ref="colorByCmRef">
+                      <button
+                        class="ctx-cm-trigger ctx-colorby-cm-trigger"
+                        :class="{ open: colorByCmOpen }"
+                        @click.stop="colorByCmOpen = !colorByCmOpen"
+                      >
+                        <span class="ctx-cm-preview" :style="{ background: getColormapById(colorByDraft.colormap)?.gradient ?? '' }"></span>
+                        <span class="ctx-cm-name">{{ getColormapById(colorByDraft.colormap)?.label ?? 'RdYlGn' }}</span>
+                        <span class="ctx-cm-chevron" v-html="ICON_CHEVRON_DOWN"></span>
+                      </button>
+                      <div v-if="colorByCmOpen" class="ctx-cm-dropdown ctx-colorby-cm-dropdown">
+                        <button
+                          v-for="cm in COLORMAPS"
+                          :key="cm.id"
+                          class="ctx-cm-option"
+                          :class="{ active: colorByDraft.colormap === cm.id }"
+                          @click="colorByDraft.colormap = cm.id; colorByCmOpen = false"
+                        >
+                          <span class="ctx-cm-option-name">{{ cm.label }}</span>
+                          <span class="ctx-cm-option-bar" :style="{ background: cm.gradient }"></span>
+                        </button>
+                      </div>
+                    </div>
+                    <button
+                      class="ctx-cm-invert-btn"
+                      :class="{ active: colorByDraft.inverted }"
+                      @click="colorByDraft.inverted = !colorByDraft.inverted"
+                      title="Invert colormap"
+                      v-html="ICON_INVERT"
+                    ></button>
+                  </div>
+                </div>
+                <div class="ctx-colorby-actions">
+                  <button class="ctx-colorby-apply-btn" @click="applyColorBy" :disabled="!colorByDraft.property">Apply</button>
+                  <button v-if="selectedLayer.colorBy" class="ctx-colorby-clear-btn" @click="clearColorBy">Clear</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <span class="group-label">Color By</span>
+        </div>
+
         <!-- Export -->
         <div v-if="selectedLayer.layerInstance" class="ribbon-group">
           <div class="ribbon-group-buttons">
@@ -503,6 +578,7 @@ const ICON_TRASH_CTX     = `<svg viewBox="0 0 24 24" width="20" height="20" fill
 const ICON_COLOR_PALETTE = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="8" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="14" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="14" r="1.2" fill="currentColor" stroke="none"/><path d="M12 18c-1.5 0-3-1-3-3a3 3 0 016 0c0 2-1.5 3-3 3z" fill="currentColor" stroke="none" opacity="0.4"/></svg>`;
 const ICON_CHEVRON_DOWN = `<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>`;
 const ICON_INVERT       = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>`;
+const ICON_COLOR_BY     = `<svg viewBox="0 0 24 24" width="20" height="20"><clipPath id="cb-clip"><rect x="2" y="7" width="20" height="8" rx="2"/></clipPath><g clip-path="url(#cb-clip)"><rect x="2" y="7" width="5" height="8" fill="#e63946"/><rect x="7" y="7" width="5" height="8" fill="#f4a261"/><rect x="12" y="7" width="5" height="8" fill="#4caf50"/><rect x="17" y="7" width="5" height="8" fill="#2a9d8f"/></g><rect x="2" y="7" width="20" height="8" rx="2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6 18l6 3 6-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`;
 
 // ---- Icons ----
 const ICON_ADD_LAYER = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/><circle cx="19" cy="5" r="4" fill="#28a745" stroke="none"/><path d="M17 5h4M19 3v4" stroke="white" stroke-width="1.8"/></svg>`;
@@ -829,10 +905,120 @@ watch(colormapDropdownOpen, (open) => {
   else document.removeEventListener('click', handleDocClick);
 });
 
-onUnmounted(() => document.removeEventListener('click', handleDocClick));
+onUnmounted(() => {
+  document.removeEventListener('click', handleDocClick);
+  document.removeEventListener('click', handleColorByDocClick);
+  document.removeEventListener('click', handleColorByCmDocClick);
+});
 
 // Close dropdown when layer changes
-watch(selectedLayer, () => { colormapDropdownOpen.value = false; });
+watch(selectedLayer, () => {
+  colormapDropdownOpen.value = false;
+  colorByPanelOpen.value = false;
+  colorByCmOpen.value = false;
+});
+
+// ---- Color By attribute ----
+const colorByControlRef = ref(null);
+const colorByCmRef = ref(null);
+const colorByPanelOpen = ref(false);
+const colorByCmOpen = ref(false);
+
+const colorByDraft = ref({ property: '', min: 0, max: 1, colormap: 'rdylgn', inverted: false });
+
+const availableNumericProps = computed(() => {
+  const layer = selectedLayer.value;
+  if (!layer?.layerInstance) return [];
+  const source = layer.layerInstance.getSource?.();
+  if (!source) return [];
+  const SKIP = new Set(['geometry', '_featureId', '_model3dUrls', '_pointcloudUrls', '_layerId']);
+  const props = new Set();
+  for (const f of source.getFeatures().slice(0, 50)) {
+    for (const [k, v] of Object.entries(f.getProperties())) {
+      if (SKIP.has(k)) continue;
+      const num = Number(v);
+      if (!isNaN(num) && v !== null && v !== '') props.add(k);
+    }
+  }
+  return [...props].sort();
+});
+
+const getColormapById = (id) => COLORMAPS.find(c => c.id === id) ?? COLORMAPS[0];
+
+const toggleColorByPanel = () => {
+  if (colorByPanelOpen.value) {
+    colorByPanelOpen.value = false;
+    colorByCmOpen.value = false;
+    return;
+  }
+  const cb = selectedLayer.value?.colorBy;
+  colorByDraft.value = cb
+    ? { property: cb.property, min: cb.min, max: cb.max, colormap: cb.colormap, inverted: !!cb.inverted }
+    : { property: '', min: 0, max: 1, colormap: 'rdylgn', inverted: false };
+  colorByPanelOpen.value = true;
+};
+
+const autoDetectRange = () => {
+  const layer = selectedLayer.value;
+  if (!layer?.layerInstance || !colorByDraft.value.property) return;
+  const source = layer.layerInstance.getSource?.();
+  if (!source) return;
+  let min = Infinity, max = -Infinity;
+  for (const f of source.getFeatures()) {
+    const val = Number(f.get(colorByDraft.value.property));
+    if (!isNaN(val)) { if (val < min) min = val; if (val > max) max = val; }
+  }
+  if (min !== Infinity) {
+    colorByDraft.value.min = +min.toPrecision(6);
+    colorByDraft.value.max = +max.toPrecision(6);
+  }
+};
+
+const applyColorBy = () => {
+  const layer = selectedLayer.value;
+  if (!layer || !colorByDraft.value.property) return;
+  layerStore.setLayerColorBy(layer._layerId, {
+    property: colorByDraft.value.property,
+    min: colorByDraft.value.min ?? 0,
+    max: colorByDraft.value.max ?? 1,
+    colormap: colorByDraft.value.colormap || 'rdylgn',
+    inverted: !!colorByDraft.value.inverted,
+  });
+  layerManager?.value?.applyLayerColorBy(layer._layerId);
+  colorByPanelOpen.value = false;
+  colorByCmOpen.value = false;
+};
+
+const clearColorBy = () => {
+  const layer = selectedLayer.value;
+  if (!layer) return;
+  layerStore.setLayerColorBy(layer._layerId, null);
+  layerManager?.value?.applyLayerColorBy(layer._layerId);
+  colorByPanelOpen.value = false;
+};
+
+const handleColorByDocClick = (e) => {
+  if (colorByControlRef.value && !colorByControlRef.value.contains(e.target)) {
+    colorByPanelOpen.value = false;
+    colorByCmOpen.value = false;
+  }
+};
+
+const handleColorByCmDocClick = (e) => {
+  if (colorByCmRef.value && !colorByCmRef.value.contains(e.target)) {
+    colorByCmOpen.value = false;
+  }
+};
+
+watch(colorByPanelOpen, (open) => {
+  if (open) setTimeout(() => document.addEventListener('click', handleColorByDocClick), 0);
+  else document.removeEventListener('click', handleColorByDocClick);
+});
+
+watch(colorByCmOpen, (open) => {
+  if (open) setTimeout(() => document.addEventListener('click', handleColorByCmDocClick), 0);
+  else document.removeEventListener('click', handleColorByCmDocClick);
+});
 
 // ---- Opacity ----
 const layerOpacity = ref(1);
@@ -1744,5 +1930,229 @@ const removeSelected = () => {
     padding: 4px 12px;
     flex-shrink: 0;
   }
+}
+
+/* ---- Color By attribute panel ---- */
+.ctx-colorby-control {
+  position: relative;
+}
+
+.ctx-colorby-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 300;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  padding: 10px 10px 8px;
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.theme-dark .ctx-colorby-panel {
+  background: #2a2a2a;
+  border-color: #555;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+}
+
+.ctx-colorby-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ctx-colorby-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.theme-dark .ctx-colorby-label {
+  color: #9ca3af;
+}
+
+.ctx-colorby-select {
+  width: 100%;
+  height: 28px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 11px;
+  font-family: "Segoe UI", sans-serif;
+  color: #333;
+  padding: 0 6px;
+  cursor: pointer;
+  outline: none;
+}
+
+.ctx-colorby-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.theme-dark .ctx-colorby-select {
+  background: #1e1e1e;
+  border-color: #555;
+  color: #e0e0e0;
+}
+
+.ctx-colorby-range-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ctx-colorby-num {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 11px;
+  font-family: "Segoe UI", sans-serif;
+  color: #333;
+  padding: 0 5px;
+  outline: none;
+  text-align: right;
+}
+
+.ctx-colorby-num:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+.theme-dark .ctx-colorby-num {
+  background: #1e1e1e;
+  border-color: #555;
+  color: #e0e0e0;
+}
+
+.ctx-colorby-sep {
+  font-size: 11px;
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+
+.ctx-colorby-auto-btn {
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: #f9fafb;
+  font-size: 10px;
+  font-family: "Segoe UI", sans-serif;
+  font-weight: 600;
+  color: #555;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ctx-colorby-auto-btn:hover:not(:disabled) {
+  background: #fff;
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+.ctx-colorby-auto-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.theme-dark .ctx-colorby-auto-btn {
+  background: #333;
+  border-color: #555;
+  color: #ccc;
+}
+
+.ctx-colorby-cm-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ctx-colorby-cm-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.ctx-colorby-cm-trigger {
+  min-width: unset;
+  width: 100%;
+}
+
+.ctx-colorby-cm-dropdown {
+  left: 0;
+  right: 0;
+  min-width: unset;
+}
+
+.ctx-colorby-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.ctx-colorby-apply-btn {
+  flex: 1;
+  height: 28px;
+  border: none;
+  border-radius: 5px;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ctx-colorby-apply-btn:hover:not(:disabled) {
+  background: #2563eb;
+}
+
+.ctx-colorby-apply-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ctx-colorby-clear-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #d1d5db;
+  border-radius: 5px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 11px;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.ctx-colorby-clear-btn:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #dc2626;
+}
+
+.theme-dark .ctx-colorby-clear-btn {
+  border-color: #555;
+  color: #9ca3af;
+}
+
+.theme-dark .ctx-colorby-clear-btn:hover {
+  background: rgba(220, 38, 38, 0.15);
+  border-color: rgba(248, 113, 113, 0.3);
+  color: #f87171;
 }
 </style>

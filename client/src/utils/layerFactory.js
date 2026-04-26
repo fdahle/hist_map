@@ -233,6 +233,7 @@ export function createGeoJSONLayerConfig(layerConf, layerId) {
     pointType: layerConf.pointType ?? null,
     thumbnailUrl: layerConf.thumbnail_url ?? null,
     downloadUrl: layerConf.download_url ?? null,
+    colorBy: layerConf.color_by ?? null,
   };
 }
 
