@@ -9,6 +9,12 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [vue()],
+    server: {
+      watch: {
+        usePolling: true,
+        interval: 300,
+      },
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),

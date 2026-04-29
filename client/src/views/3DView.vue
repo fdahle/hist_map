@@ -45,12 +45,13 @@
       @drop.prevent="onDrop"
     >
       <!-- Layer Manager fixed at left -->
-      <LayerManager 
+      <LayerManager
         ref="layerManagerRef"
         @toggle-layer-visibility="onToggleLayerVisibility"
         @remove-layer="onRemoveLayer"
         @zoom-to-layer="onZoomToLayer"
         @select-layer="onSelect3DLayer"
+        @open-settings="isSettingsOpen = true"
       />
 
       <!-- Main 3D canvas -->
@@ -160,6 +161,13 @@
       @close="isShareSceneOpen = false"
       @apply-view="onApplySharedView"
     />
+
+    <!-- Settings Modal -->
+    <SettingsModal
+      :is-open="isSettingsOpen"
+      mode="3d"
+      @close="isSettingsOpen = false"
+    />
   </div>
 </template>
 
@@ -175,6 +183,7 @@ import MeasurementModal from '@/components/modals/MeasurementModal.vue';
 import CoordPickerModal from '@/components/modals/CoordPickerModal.vue';
 import BookmarksModal from '@/components/modals/BookmarksModal.vue';
 import Share3DModal from '@/components/modals/Share3DModal.vue';
+import SettingsModal from '@/components/modals/SettingsModal.vue';
 import BugReportButton from '@/components/common/BugReportButton.vue';
 
 const canvasRef = ref(null);
@@ -183,6 +192,7 @@ const selectedLayer3D = ref(null);
 const isCoordPickerOpen = ref(false);
 const isBookmarksOpen = ref(false);
 const isShareSceneOpen = ref(false);
+const isSettingsOpen = ref(false);
 
 // Drag-and-drop state
 const isDragOver = ref(false);
@@ -279,22 +289,23 @@ const onLoadingProgress = ({ url, index, loaded, total, progress, status }) => {
   const loadedMB = (loaded / (1024 * 1024)).toFixed(1);
   const totalMB = (total / (1024 * 1024)).toFixed(1);
   
+  // For URL-based loads the url is a full path containing the layer UUID;
+  // use storedName in that case so messages show the human-readable name.
+  const displayName = url.includes('/') ? storedName : url;
+
   if (status === 'downloading') {
     loadingStatus.value = `Downloading model ${index + 1}/${modelUrls.value.length}: ${loadedMB}MB / ${totalMB}MB (${progress}%)`;
   } else if (status === 'decoding') {
     loadingStatus.value = `Decoding model data (${totalMB}MB)...`;
   } else if (status === 'reading') {
-    const fileName = url.split('/').pop();
-    loadingStatus.value = `Reading ${fileName}: ${loadedMB}MB / ${totalMB}MB (${progress}%)`;
+    loadingStatus.value = `Reading ${displayName}: ${loadedMB}MB / ${totalMB}MB (${progress}%)`;
   } else if (status === 'decompressing') {
-    const fileName = url.split('/').pop();
-    loadingStatus.value = `Decompressing ${fileName}…`;
+    loadingStatus.value = `Decompressing ${displayName}…`;
     loadingProgress.value = 0;
   } else if (status === 'parsing') {
-    const fileName = url.split('/').pop();
     loadingStatus.value = progress > 0 && progress < 100
-      ? `Processing ${fileName}: ${progress}%`
-      : `Parsing ${fileName}...`;
+      ? `Processing ${displayName}: ${progress}%`
+      : `Parsing ${displayName}...`;
   }
 };
 

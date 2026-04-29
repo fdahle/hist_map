@@ -1,7 +1,29 @@
 <template>
   <div id="app" :class="'theme-' + theme">
+    <!-- User access password gate (skipped for admin route) -->
+    <div v-if="needsUserAuth && !isAdminRoute" class="user-gate-overlay">
+      <div class="user-gate-modal">
+        <h2 class="user-gate-title">Enter Password</h2>
+        <form class="user-gate-form" @submit.prevent="submitUserAuth">
+          <input
+            ref="userGateInputRef"
+            v-model="userGatePassword"
+            type="password"
+            class="user-gate-input"
+            placeholder="Password"
+            autocomplete="current-password"
+            :disabled="userGateLoading"
+          />
+          <p v-if="userGateError" class="user-gate-error">{{ userGateError }}</p>
+          <button type="submit" class="user-gate-btn" :disabled="userGateLoading || !userGatePassword">
+            {{ userGateLoading ? 'Checking…' : 'Continue' }}
+          </button>
+        </form>
+      </div>
+    </div>
+
     <!-- Config loaded normally, or admin route (works without config) -->
-    <div v-if="isConfigLoaded || isAdminRoute">
+    <div v-else-if="isConfigLoaded || isAdminRoute">
       <router-view />
     </div>
 
@@ -20,7 +42,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, provide, watch, computed } from "vue";
+import { ref, onMounted, provide, watch, computed, nextTick } from "vue";
 import { storeToRefs } from "pinia";
 import yaml from "js-yaml";
 import { useRoute } from "vue-router";
@@ -34,6 +56,39 @@ import { getApiUrl } from "./utils/config";
 const appConfig = ref(null);
 const isConfigLoaded = ref(false);
 const configError = ref(null);
+
+// ── User access password gate ─────────────────────────────────────────────────
+const needsUserAuth    = ref(false);
+const userGatePassword = ref('');
+const userGateLoading  = ref(false);
+const userGateError    = ref('');
+const userGateInputRef = ref(null);
+
+async function submitUserAuth() {
+  userGateError.value = '';
+  userGateLoading.value = true;
+  try {
+    const res = await fetch(getApiUrl('/user/verify'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: userGatePassword.value }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      userGateError.value = body.error || 'Incorrect password.';
+      userGatePassword.value = '';
+      return;
+    }
+    sessionStorage.setItem('user_authenticated', '1');
+    needsUserAuth.value = false;
+    // Continue with config loading now that auth is confirmed
+    await loadAppConfig();
+  } catch {
+    userGateError.value = 'Could not connect to server.';
+  } finally {
+    userGateLoading.value = false;
+  }
+}
 
 // Allow the admin route to render even when config isn't loaded yet
 const isAdminRoute = computed(() => route.path.startsWith('/admin'));
@@ -93,6 +148,26 @@ onMounted(async () => {
     }
   } catch { /* server unreachable — leave adminEnabled as true (safe default) */ }
 
+  // Check user access password gate (skip for admin routes)
+  if (!route.path.startsWith('/admin')) {
+    try {
+      const userAuthRes = await fetch(getApiUrl('/user/auth-status'));
+      if (userAuthRes.ok) {
+        const u = await userAuthRes.json();
+        if (u.hasUserPassword && !sessionStorage.getItem('user_authenticated')) {
+          needsUserAuth.value = true;
+          await nextTick();
+          userGateInputRef.value?.focus();
+          return; // loadAppConfig() will be called after successful auth
+        }
+      }
+    } catch { /* server unreachable — allow through */ }
+  }
+
+  await loadAppConfig();
+});
+
+async function loadAppConfig() {
   // Fetch viewer access status so the router guard and ribbon button are ready before config loads
   try {
     const viewerRes = await fetch(getApiUrl('/viewer/access-status'));
@@ -124,7 +199,7 @@ onMounted(async () => {
     logger.error('App', 'Failed to load config:', e);
     configError.value = e.message;
   }
-});
+}
 
 const reloadApp = () => window.location.reload();
 </script>
@@ -170,6 +245,39 @@ body.theme-light {
 .theme-light .loading {
   color: #999;
 }
+
+/* User access password gate */
+.user-gate-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(4px);
+}
+.user-gate-modal {
+  background: #fff; border-radius: 12px; padding: 2rem 2rem 1.75rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18); width: 100%; max-width: 340px;
+}
+.theme-dark .user-gate-modal {
+  background: #2d2d2d; color: #e0e0e0;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+}
+.user-gate-title {
+  font-size: 1.15rem; font-weight: 600; margin: 0 0 1.1rem; text-align: center; color: inherit;
+}
+.user-gate-form { display: flex; flex-direction: column; gap: 0.6rem; }
+.user-gate-input {
+  padding: 0.6rem 0.75rem; border: 1px solid #d1d5db; border-radius: 6px;
+  font-size: 0.9rem; outline: none; transition: border-color 0.15s;
+  background: #fff; color: #111; width: 100%; box-sizing: border-box;
+}
+.theme-dark .user-gate-input { background: #3a3a3a; border-color: #555; color: #e0e0e0; }
+.user-gate-input:focus { border-color: #3b82f6; }
+.user-gate-error { font-size: 0.8rem; color: #ef4444; margin: 0; }
+.user-gate-btn {
+  padding: 0.6rem; border-radius: 6px; background: #3b82f6; border: none;
+  color: #fff; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: background 0.15s;
+}
+.user-gate-btn:hover:not(:disabled) { background: #2563eb; }
+.user-gate-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* First-run setup modal */
 .setup-modal {

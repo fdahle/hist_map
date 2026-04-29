@@ -30,6 +30,13 @@
       </div>
     </div>
 
+    <div class="layer-footer">
+      <button class="settings-btn" @click="$emit('open-settings')">
+        <span class="settings-icon" v-html="ICON_SETTINGS"></span>
+        <span>Settings</span>
+      </button>
+    </div>
+
     <!-- Context Menu -->
     <ContextMenu3D
       ref="contextMenuRef"
@@ -60,10 +67,11 @@ import {
   ICON_PACKAGE,
   ICON_EYE,
   ICON_EYE_OFF,
-  ICON_TRASH
+  ICON_TRASH,
+  ICON_SETTINGS
 } from '@/constants/icons.js';
 
-const emit = defineEmits(['toggle-layer-visibility', 'remove-layer', 'zoom-to-layer', 'select-layer']);
+const emit = defineEmits(['toggle-layer-visibility', 'remove-layer', 'zoom-to-layer', 'select-layer', 'open-settings']);
 
 const layers = ref([]);
 const selectedLayerId = ref(null);
@@ -439,6 +447,60 @@ defineExpose({
 
 .theme-dark .empty-state {
   color: #666;
+}
+
+.layer-footer {
+  padding: 10px 8px;
+  border-top: 1px solid #ddd;
+  flex-shrink: 0;
+  background: #f8f9fa;
+}
+
+.theme-dark .layer-footer {
+  border-top: 1px solid #444;
+  background: #2a2a2a;
+}
+
+.settings-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  color: #555;
+  font-size: 13px;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.theme-dark .settings-btn {
+  background: rgba(255, 255, 255, 0.05);
+  color: #aaa;
+}
+
+.settings-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #222;
+}
+
+.theme-dark .settings-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.settings-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.settings-icon :deep(svg) {
+  width: 15px;
+  height: 15px;
 }
 
 /* Scrollbar styling */

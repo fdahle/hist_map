@@ -20,11 +20,12 @@ import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import config, { isDevelopment, isProduction } from './src/config.js';
 import logger from './src/logger.js';
-import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, metaToConfigLayer, validateLayerId, resolveInDir, safeLayerExt } from './src/layerStore.js';
+import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, readLinks, writeLinks, metaToConfigLayer, validateLayerId, resolveInDir, safeLayerExt } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
 import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink, parseGeoFile, serializeGeoFile } from './processors/uploadProcessor.js';
 import { convertToCog, isGdalAvailable } from './processors/geotiffProcessor.js';
 import { convertToCopc, isPdalAvailable } from './processors/pointcloudProcessor.js';
+import { parse as csvParse } from 'csv-parse/sync';
 
 const app = express();
 
@@ -45,6 +46,17 @@ try {
 } catch (err) { logger.warn('Could not load stored credentials:', err.message); }
 
 function getAdminPassword() { return runtimeAdminPassword; }
+
+// ── Runtime user password ──────────────────────────────────────
+// Stored in data/.user-credentials. Optional — when absent the app is public.
+const userCredentialsFilePath = path.join(__dirname, config.dataPath, '.user-credentials');
+let runtimeUserPassword = null;
+try {
+  const stored = (await fs.readFile(userCredentialsFilePath, 'utf8').catch(() => null))?.trim();
+  if (stored) runtimeUserPassword = stored;
+} catch (err) { logger.warn('Could not load user credentials:', err.message); }
+
+function getUserPassword() { return runtimeUserPassword; }
 
 // CORS configuration
 const corsOptions = {
@@ -116,7 +128,7 @@ if (isDevelopment) {
 const configFilePath = path.join(__dirname, config.dataPath, 'config.yaml');
 
 // Admin authentication middleware — compares submitted password against the stored bcrypt hash.
-function requireAdminAuth(req, res, next) {
+async function requireAdminAuth(req, res, next) {
   const hash = getAdminPassword();
   if (!hash) {
     return res.status(503).json({ error: 'Admin access not configured. Use the setup wizard to set a password.' });
@@ -129,13 +141,14 @@ function requireAdminAuth(req, res, next) {
   const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
   const colonIndex = decoded.indexOf(':');
   const password = colonIndex >= 0 ? decoded.slice(colonIndex + 1) : '';
-  // bcrypt.compare is timing-safe and handles both hash format validation and comparison.
-  bcrypt.compare(password, hash)
-    .then(match => {
-      if (!match) return res.status(403).json({ error: 'Invalid credentials' });
-      next();
-    })
-    .catch(() => res.status(500).json({ error: 'Authentication error' }));
+  try {
+    // bcrypt.compare is timing-safe and handles both hash format validation and comparison.
+    const match = await bcrypt.compare(password, hash);
+    if (!match) return res.status(403).json({ error: 'Invalid credentials' });
+    next();
+  } catch {
+    return res.status(500).json({ error: 'Authentication error' });
+  }
 }
 
 // Rate limiting for auth endpoints — prevents brute-force attacks.
@@ -181,7 +194,17 @@ const adminRateLimit = rateLimit({
 
 // Apply rate limits to route groups before any route handler is registered.
 app.use('/admin', adminRateLimit);
-app.use(['/config', '/viewer', '/health'], generalRateLimit);
+app.use(['/config', '/viewer', '/health', '/user'], generalRateLimit);
+
+// Shared catch-block helper — centralises the not-found / server-error pattern
+// repeated across route handlers. Use `status` to override the default 500.
+function handleRouteError(res, err, status = 500) {
+  if (err.message?.includes('not found') || err.code === 'ENOENT') {
+    return res.status(404).json({ error: err.message });
+  }
+  const message = (status < 500 || isDevelopment) ? err.message : 'Internal Server Error';
+  return res.status(status).json({ error: message });
+}
 
 // ── Admin disabled guard ───────────────────────────────────────────────────────
 // When ADMIN_ENABLED=false all /admin/* routes return 404 — the panel does not
@@ -245,6 +268,54 @@ app.post('/admin/change-password', authRateLimit, requireAdminAuth, express.json
 // Verify admin credentials — used by the client login form
 app.get('/admin/verify', authRateLimit, requireAdminAuth, (req, res) => {
   res.json({ ok: true });
+});
+
+// ── User access password ───────────────────────────────────────────────────────
+
+// Public: tells the client whether a user password gate is active
+app.get('/user/auth-status', (req, res) => {
+  res.json({ hasUserPassword: !!getUserPassword() });
+});
+
+// Public: verify the user password (rate-limited)
+app.post('/user/verify', authRateLimit, express.json(), async (req, res) => {
+  const hash = getUserPassword();
+  if (!hash) return res.json({ ok: true });
+  const { password } = req.body ?? {};
+  if (!password || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Password required.' });
+  }
+  try {
+    const match = await bcrypt.compare(password, hash);
+    if (!match) return res.status(403).json({ error: 'Incorrect password.' });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'Authentication error.' });
+  }
+});
+
+// Admin: set or clear the user access password
+app.post('/admin/user-password', authRateLimit, requireAdminAuth, express.json(), async (req, res) => {
+  const { password, clear } = req.body ?? {};
+  if (clear) {
+    await fs.unlink(userCredentialsFilePath).catch(() => {});
+    runtimeUserPassword = null;
+    logger.info('User access password cleared');
+    return res.json({ success: true });
+  }
+  if (!password || typeof password !== 'string' || password.length < 4) {
+    return res.status(400).json({ error: 'Password must be at least 4 characters.' });
+  }
+  try {
+    const hash = await bcrypt.hash(password, 12);
+    await fs.writeFile(userCredentialsFilePath, hash, { mode: 0o600 });
+    runtimeUserPassword = hash;
+    logger.info('User access password set');
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Failed to save user credentials:', err.message);
+    res.status(500).json({ error: 'Failed to save password.' });
+  }
 });
 
 // Viewer access status — public, tells the client whether the 3D viewer is accessible
@@ -317,6 +388,9 @@ app.delete('/config', requireAdminAuth, async (req, res) => {
   } catch (err) {
     if (err.code !== 'ENOENT') errors.push(`credentials: ${err.message}`);
   }
+  // Clear user access password as well.
+  await fs.unlink(userCredentialsFilePath).catch(() => {});
+  runtimeUserPassword = null;
   if (errors.length) return res.status(500).json({ error: errors.join('; ') });
   res.json({ success: true });
 });
@@ -433,7 +507,7 @@ app.get('/admin/layers', requireAdminAuth, async (req, res) => {
     const layers = await listLayers(layersDir);
     res.json(layers);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return handleRouteError(res, err);
   }
 });
 
@@ -444,8 +518,7 @@ app.get('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     const meta = await readLayerMeta(layersDir, req.params.id);
     res.json(meta);
   } catch (err) {
-    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(400).json({ error: err.message });
+    return handleRouteError(res, err, 400);
   }
 });
 
@@ -454,7 +527,12 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
   try {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
-    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, thumbnail_url, download_url, pointType, csvLink } = req.body ?? {};
+    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, thumbnail_url, download_url, pointType, group_by, csvLink } = req.body ?? {};
+    if (displayName  != null && String(displayName).length  > 200)  return res.status(400).json({ error: 'displayName too long (max 200)' });
+    if (color        != null && String(color).length        > 100)  return res.status(400).json({ error: 'color too long (max 100)' });
+    if (stroke_color != null && String(stroke_color).length > 100)  return res.status(400).json({ error: 'stroke_color too long (max 100)' });
+    if (fill_color   != null && String(fill_color).length   > 100)  return res.status(400).json({ error: 'fill_color too long (max 100)' });
+    if (attribution  != null && String(attribution).length  > 1000) return res.status(400).json({ error: 'attribution too long (max 1000)' });
     if (displayName  != null) meta.layerConfig.displayName  = String(displayName);
     if (visible      != null) meta.layerConfig.visible      = Boolean(visible);
     if (order        != null) meta.layerConfig.order        = Number(order);
@@ -471,6 +549,7 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     if ('thumbnail_url' in (req.body ?? {})) meta.layerConfig.thumbnail_url = thumbnail_url ? String(thumbnail_url) : null;
     if ('download_url'  in (req.body ?? {})) meta.layerConfig.download_url  = download_url  ? String(download_url)  : null;
     if ('pointType'     in (req.body ?? {})) meta.layerConfig.pointType     = pointType ? String(pointType) : null;
+    if ('group_by'      in (req.body ?? {})) meta.layerConfig.group_by      = group_by  ? String(group_by)  : null;
     // CRS override (any layer type)
     const { sourceCrs, tiffProjection } = req.body ?? {};
     if (sourceCrs != null) meta.layerConfig.sourceCrs = String(sourceCrs);
@@ -518,42 +597,83 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     await writeLayerMeta(layersDir, req.params.id, meta);
     res.json(meta);
   } catch (err) {
-    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(400).json({ error: err.message });
+    return handleRouteError(res, err, 400);
   }
 });
 
-// Preview first N features of a GeoJSON layer (pandas.head-style)
+// Preview first N rows of a GeoJSON or CSV layer
 app.get('/admin/layers/:id/preview', requireAdminAuth, async (req, res) => {
   try {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
-    if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Preview only available for GeoJSON layers.' });
+    const n = Math.min(Math.max(1, parseInt(req.query.n ?? '10', 10)), 200);
+    const filePath = resolveInDir(layersDir, req.params.id, `${req.params.id}${safeLayerExt(meta.extension)}`);
+    const raw = await fs.readFile(filePath, 'utf8');
+
+    if (meta.fileType === 'csv') {
+      const records = csvParse(raw, { columns: true, skip_empty_lines: true, relax_column_count: true });
+      const columns = records.length > 0 ? Object.keys(records[0]) : (meta.csvColumns ?? []);
+      const rows = records.slice(0, n).map(r => columns.map(c => r[c] ?? ''));
+      const totalLines = raw.split('\n').filter(l => l.trim()).length - 1;
+      return res.json({ columns, rows, total: Math.max(totalLines, records.length) });
+    }
+
+    if (meta.fileType === 'geojson') {
+      const geojson = JSON.parse(raw);
+      const features = (geojson.features ?? []).slice(0, n);
+      const columnSet = new Set();
+      for (const f of features) {
+        for (const k of Object.keys(f.properties ?? {})) columnSet.add(k);
+      }
+      const isUrl = v => typeof v === 'string' && /^https?:\/\//i.test(v.trim());
+      const columns = [...columnSet].filter(col => {
+        if (col.startsWith('_')) return false;
+        const vals = features.map(f => f.properties?.[col]).filter(v => v != null && String(v) !== '');
+        if (vals.length > 0 && vals.every(v => isUrl(v))) return false;
+        return true;
+      });
+      const rows = features.map(f => columns.map(c => {
+        const v = f.properties?.[c];
+        return v == null ? '' : String(v);
+      }));
+      return res.json({ columns, rows, total: geojson.features?.length ?? 0 });
+    }
+
+    return res.status(400).json({ error: 'Preview not available for this layer type.' });
+  } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// List feature IDs with display labels (used by the Linking tab)
+app.get('/admin/layers/:id/features', requireAdminAuth, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const meta = await readLayerMeta(layersDir, req.params.id);
+    if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Only GeoJSON layers have features.' });
     const filePath = resolveInDir(layersDir, req.params.id, `${req.params.id}${safeLayerExt(meta.extension)}`);
     const raw = await fs.readFile(filePath, 'utf8');
     const geojson = JSON.parse(raw);
-    const n = Math.min(parseInt(req.query.n ?? '5', 10), 50);
-    const features = (geojson.features ?? []).slice(0, n);
-    const columnSet = new Set();
-    for (const f of features) {
-      for (const k of Object.keys(f.properties ?? {})) columnSet.add(k);
-    }
-    // Filter out internal (_-prefixed) keys and URL-only columns
-    const isUrl = v => typeof v === 'string' && /^https?:\/\//i.test(v.trim());
-    const columns = [...columnSet].filter(col => {
-      if (col.startsWith('_')) return false;
-      const vals = features.map(f => f.properties?.[col]).filter(v => v != null && String(v) !== '');
-      if (vals.length > 0 && vals.every(v => isUrl(v))) return false;
-      return true;
-    });
-    const rows = features.map(f => columns.map(c => {
-      const v = f.properties?.[c];
-      return v == null ? '' : String(v);
-    }));
-    res.json({ columns, rows, total: geojson.features?.length ?? 0 });
+    const searchFields = meta.layerConfig?.search_fields ?? [];
+    const features = (geojson.features ?? []).map(f => {
+      const props = f.properties ?? {};
+      const id = props._featureId ?? null;
+      let label = null;
+      for (const field of searchFields) {
+        if (props[field] != null && String(props[field]).trim()) { label = String(props[field]); break; }
+      }
+      if (!label) {
+        for (const [k, v] of Object.entries(props)) {
+          if (k.startsWith('_')) continue;
+          if (typeof v === 'string' && /^https?:\/\//i.test(v)) continue;
+          if (v != null && String(v).trim()) { label = String(v); break; }
+        }
+      }
+      return { id, label: label ?? id?.slice(0, 8) ?? '?' };
+    }).filter(f => f.id);
+    res.json({ features, total: features.length });
   } catch (err) {
-    if (err.message?.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
+    return handleRouteError(res, err);
   }
 });
 
@@ -565,10 +685,83 @@ app.delete('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     logger.info(`Deleted layer: ${req.params.id}`);
     res.json({ success: true, deleted: req.params.id });
   } catch (err) {
-    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(400).json({ error: err.message });
+    return handleRouteError(res, err, 400);
   }
 });
+
+// ── Layer links (2D ↔ 3D per-feature, 2D ↔ CSV per-layer) ───────────────────
+
+// Get links for a layer (admin)
+app.get('/admin/layers/:id/links', requireAdminAuth, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const links = await readLinks(layersDir, req.params.id);
+    res.json(links);
+  } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// Replace all links for a layer (admin)
+app.put('/admin/layers/:id/links', requireAdminAuth, express.json({ limit: '1mb' }), async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const { csvLinks, featureLinks } = req.body ?? {};
+    if (!Array.isArray(csvLinks) || !Array.isArray(featureLinks)) {
+      return res.status(400).json({ error: 'links body must have csvLinks[] and featureLinks[] arrays.' });
+    }
+    // Validate featureLink entries
+    for (const fl of featureLinks) {
+      if (typeof fl.featureId !== 'string') return res.status(400).json({ error: 'featureLink.featureId must be a string.' });
+      if (!Array.isArray(fl.modelLayerIds))      fl.modelLayerIds      = [];
+      if (!Array.isArray(fl.pointcloudLayerIds))  fl.pointcloudLayerIds = [];
+      for (const lid of [...fl.modelLayerIds, ...fl.pointcloudLayerIds]) {
+        try { validateLayerId(lid); } catch {
+          return res.status(400).json({ error: `Invalid layer ID in featureLinks: ${lid}` });
+        }
+      }
+    }
+    // Validate csvLink entries
+    for (const cl of csvLinks) {
+      try { validateLayerId(cl.dataLayerId); } catch {
+        return res.status(400).json({ error: `Invalid dataLayerId in csvLinks: ${cl.dataLayerId}` });
+      }
+      if (typeof cl.csvJoinColumn !== 'string' || !cl.csvJoinColumn)
+        return res.status(400).json({ error: 'csvLink.csvJoinColumn must be a non-empty string.' });
+      if (typeof cl.featureJoinProperty !== 'string' || !cl.featureJoinProperty)
+        return res.status(400).json({ error: 'csvLink.featureJoinProperty must be a non-empty string.' });
+    }
+    const links = { csvLinks, featureLinks };
+    await writeLinks(layersDir, req.params.id, links);
+    res.json(links);
+  } catch (err) {
+    return handleRouteError(res, err, 400);
+  }
+});
+
+// Public endpoint — viewer uses this to resolve 3D URLs and CSV joins at load time
+app.get('/layers/:id/links', dataRateLimit, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const links = await readLinks(layersDir, req.params.id);
+    res.json(links);
+  } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// Public layer meta — viewer uses this to resolve linked 3D layer file URLs
+app.get('/layers/:id/meta', dataRateLimit, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const meta = await readLayerMeta(layersDir, req.params.id);
+    res.json({ id: meta.id, name: meta.layerConfig?.displayName || meta.originalName, fileType: meta.fileType, extension: meta.extension });
+  } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// ── Sub-files (legacy, kept for OBJ companion management) ────────────────────
 
 // Add sub-file to an existing layer
 app.post('/admin/layers/:id/subfiles', requireAdminAuth, runSubfileMiddleware, async (req, res) => {
@@ -581,8 +774,7 @@ app.post('/admin/layers/:id/subfiles', requireAdminAuth, runSubfileMiddleware, a
     const result = await addSubFile(req.params.id, req.file, role, layersDir, settings);
     res.json(result);
   } catch (err) {
-    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
+    return handleRouteError(res, err);
   }
 });
 
@@ -596,8 +788,7 @@ app.post('/admin/layers/:id/subfiles/batch', requireAdminAuth, runUploadMiddlewa
     const result = await addSubFileBatch(req.params.id, req.files, layersDir, allSettings);
     res.json(result);
   } catch (err) {
-    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
+    return handleRouteError(res, err);
   }
 });
 
@@ -638,17 +829,8 @@ app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, re
       const geoPath = resolveInDir(layerDir, `${id}${geoExt}`);
       try {
         const raw = await fs.readFile(geoPath, 'utf8');
-        let features, header;
-        const isNdjson = geoExt === '.geojsonl';
-        if (isNdjson) {
-          const lines = raw.split('\n').filter(Boolean);
-          header   = lines.length > 0 ? JSON.parse(lines[0]) : {};
-          features = lines.slice(1).map(l => JSON.parse(l));
-        } else {
-          const geojson = JSON.parse(raw);
-          header   = { _metadata: geojson._metadata };
-          features = geojson.features ?? [];
-        }
+        const { features: parsedFeatures, header } = parseGeoFile(raw, geoPath);
+        let features = parsedFeatures;
         let modified = false;
         features = features.map(f => {
           if (!f.properties) return f;
@@ -669,13 +851,16 @@ app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, re
           md.has3DModels    = features.some(f => f.properties?._model3dUrls?.length > 0);
           md.hasPointClouds = features.some(f => f.properties?._pointcloudUrls?.length > 0);
           header._metadata  = md;
-          if (isNdjson) {
-            const body = features.map(f => JSON.stringify(f)).join('\n');
-            await fs.writeFile(geoPath, `${JSON.stringify(header)}\n${body}`, 'utf8');
-          } else {
-            const fc = { type: 'FeatureCollection', features, _metadata: md };
-            await fs.writeFile(geoPath, JSON.stringify(fc), 'utf8');
+          await fs.writeFile(geoPath, serializeGeoFile(features, header, geoPath), 'utf8');
+          // Recompute linked counts so layer cards stay accurate
+          const linkedModelUrls = new Set();
+          const linkedPcUrls    = new Set();
+          for (const f of features) {
+            for (const u of f.properties?._model3dUrls    ?? []) linkedModelUrls.add(u);
+            for (const u of f.properties?._pointcloudUrls ?? []) linkedPcUrls.add(u);
           }
+          meta.linkedModelCount      = linkedModelUrls.size;
+          meta.linkedPointcloudCount = linkedPcUrls.size;
         }
       } catch { /* GeoJSON read/write failure is non-fatal */ }
     }
@@ -684,8 +869,7 @@ app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, re
     logger.info(`Deleted sub-file ${subId} from layer ${id}`);
     res.json({ success: true, deleted: subId });
   } catch (err) {
-    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(400).json({ error: err.message });
+    return handleRouteError(res, err, 400);
   }
 });
 
@@ -723,7 +907,8 @@ function _startOptimizationJob(layerId, type, dataPath) {
         if (success) {
           meta.status   = 'ready';
           meta.optimized = true;
-          meta.dataPath  = meta.dataPath.replace(/\.(las|laz)$/i, '.copc.laz');
+          meta.dataPath  = dataPath.replace(/\.(las|laz)$/i, '.copc.laz');
+          meta.extension = '.copc.laz';
           if (originalBackup) meta.originalBackup = originalBackup;
         } else {
           meta.status = 'ready'; // usable even without COPC
@@ -795,6 +980,10 @@ app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req,
     let linkedCount = 0;
     let hasModels = false;
     let hasPcs = false;
+
+    // Build a sub-file ID → original name lookup for human-readable names
+    const subFileNameMap = new Map((meta.subFiles ?? []).map(sf => [sf.id, path.parse(sf.originalName).name]));
+
     const updated = features.map((feature) => {
       if (!feature.properties) feature.properties = {};
       const fid = feature.properties._featureId;
@@ -802,6 +991,11 @@ app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req,
         const assign = assignments[fid];
         feature.properties._model3dUrls    = Array.isArray(assign.models)      ? assign.models      : [];
         feature.properties._pointcloudUrls = Array.isArray(assign.pointclouds) ? assign.pointclouds : [];
+
+        // Resolve human-readable names from sub-file metadata
+        feature.properties._model3dNames    = feature.properties._model3dUrls.map(u => subFileNameMap.get(path.parse(u).name)).filter(Boolean);
+        feature.properties._pointcloudNames = feature.properties._pointcloudUrls.map(u => subFileNameMap.get(path.parse(u).name)).filter(Boolean);
+
         if (feature.properties._model3dUrls.length > 0)    hasModels = true;
         if (feature.properties._pointcloudUrls.length > 0) hasPcs    = true;
         if (feature.properties._model3dUrls.length + feature.properties._pointcloudUrls.length > 0) {
@@ -818,12 +1012,23 @@ app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req,
     header._metadata  = md;
 
     await fs.writeFile(filePath, serializeGeoFile(updated, header, filePath), 'utf8');
+
+    // Store per-asset-type linked counts in meta.json so layer cards can show unlinked counts
+    const linkedModelUrls = new Set();
+    const linkedPcUrls    = new Set();
+    for (const f of updated) {
+      for (const u of f.properties?._model3dUrls    ?? []) linkedModelUrls.add(u);
+      for (const u of f.properties?._pointcloudUrls ?? []) linkedPcUrls.add(u);
+    }
+    meta.linkedModelCount       = linkedModelUrls.size;
+    meta.linkedPointcloudCount  = linkedPcUrls.size;
+    await writeLayerMeta(layersDir, id, meta);
+
     logger.info(`Layer link: ${id} — ${linkedCount} feature(s) with assets`);
     res.json({ success: true, layerId: id, linkedCount });
   } catch (err) {
-    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
     logger.error('Layer link error:', err.message);
-    res.status(500).json({ error: err.message });
+    return handleRouteError(res, err);
   }
 });
 
@@ -907,7 +1112,7 @@ app.post('/admin/relink', requireAdminAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     logger.error('Re-link error:', err.message);
-    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
+    return handleRouteError(res, err);
   }
 });
 
@@ -923,8 +1128,7 @@ app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
     const backupPath = resolveInDir(layersDir, req.params.id, path.basename(meta.originalBackup));
     res.download(backupPath, meta.originalName);
   } catch (err) {
-    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
+    return handleRouteError(res, err);
   }
 });
 
@@ -947,8 +1151,13 @@ app.use('/data', dataRateLimit, (req, res, next) => {
 }));
 
 // 404 handler
+const SILENT_404_PATHS = new Set(['/favicon.ico', '/robots.txt', '/sitemap.xml']);
 app.use((req, res) => {
-  logger.warn(`404 Not Found: ${req.method} ${req.path}`);
+  if (SILENT_404_PATHS.has(req.path)) {
+    logger.debug(`404 Not Found: ${req.method} ${req.path}`);
+  } else {
+    logger.warn(`404 Not Found: ${req.method} ${req.path}`);
+  }
   res.status(404).json({ error: 'Not Found' });
 });
 

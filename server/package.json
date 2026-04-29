@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
+    "dev": "nodemon --watch src --watch index.js --ext js,mjs index.js",
     "prepare-data": "node preprocess.js"
   },
   "keywords": [],
@@ -28,6 +29,9 @@
     "proj4": "^2.20.2",
     "reproject": "^1.2.7",
     "shapefile": "^0.6.6",
-    "uuid": "^13.0.0"
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

@@ -4,7 +4,7 @@
       <div class="modal-header">
         <h3>
           <span v-html="ICON_INFO"></span>
-          Acknowledgments
+          About Stratum3D
         </h3>
         <button @click="$emit('close')" class="close-btn" title="Close">
           <span v-html="ICON_CLOSE"></span>
@@ -12,6 +12,17 @@
       </div>
 
       <div class="modal-body">
+        <section class="ack-section about-app">
+          <p class="app-description">
+            A web-based geospatial visualization system with 3D model and point cloud support,
+            designed for historical map data and geographical features.
+          </p>
+          <a href="https://github.com/fdahle/stratum3D" target="_blank" rel="noopener noreferrer" class="github-link">
+            <span v-html="ICON_GITHUB"></span>
+            github.com/fdahle/stratum3D
+          </a>
+        </section>
+
         <section class="ack-section">
           <h4>Built With</h4>
           <div class="ack-item">
@@ -43,7 +54,7 @@
         <section class="ack-section">
           <h4>License</h4>
           <p class="license-text">
-            This project is open source and available under the MIT License.
+            This project is open source and available under the <a href="https://github.com/fdahle/stratum3D?tab=MIT-1-ov-file#readme" target="_blank" rel="noopener noreferrer">MIT License</a>.
           </p>
         </section>
 
@@ -58,7 +69,7 @@
 
 <script setup>
 import { computed } from 'vue';
-import { ICON_INFO, ICON_CLOSE } from '@/constants/icons';
+import { ICON_INFO, ICON_CLOSE, ICON_GITHUB } from '@/constants/icons';
 
 defineProps({
   isOpen: {
@@ -327,6 +338,27 @@ const currentYear = computed(() => new Date().getFullYear());
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
+.license-text a {
+  color: #4a9eff;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.theme-light .license-text a {
+  color: #2563eb;
+}
+
+.license-text a:hover {
+  color: #6bb0ff;
+  border-bottom-color: #4a9eff;
+}
+
+.theme-light .license-text a:hover {
+  color: #1d4ed8;
+  border-bottom-color: #2563eb;
+}
+
 .ack-section.version {
   text-align: center;
   padding-top: 24px;
@@ -353,6 +385,63 @@ const currentYear = computed(() => new Date().getFullYear());
 
 .theme-light .copyright {
   color: #aaa !important;
+}
+
+.about-app {
+  padding: 16px;
+  background: rgba(74, 158, 255, 0.05);
+  border: 1px solid rgba(74, 158, 255, 0.2);
+  border-radius: 8px;
+}
+
+.theme-light .about-app {
+  background: rgba(37, 99, 235, 0.04);
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.app-description {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  color: #ccc;
+  line-height: 1.6;
+}
+
+.theme-light .app-description {
+  color: #444;
+}
+
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #4a9eff;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.theme-light .github-link {
+  color: #2563eb;
+}
+
+.github-link:hover {
+  color: #6bb0ff;
+  border-bottom-color: #4a9eff;
+}
+
+.theme-light .github-link:hover {
+  color: #1d4ed8;
+  border-bottom-color: #2563eb;
+}
+
+.github-link :deep(span) {
+  display: flex;
+  align-items: center;
+}
+
+.github-link :deep(svg) {
+  flex-shrink: 0;
 }
 
 /* Scrollbar styling */

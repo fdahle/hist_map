@@ -306,7 +306,8 @@ const handle3DView = () => {
   logger.debug('AttributePanel', 'Opening 3D viewer with:', { models: model3dUrls.value, pointclouds: pointcloudUrls.value });
 
   const props = selectedFeature.value.properties;
-  const name = props.name || featureTitle.value || 'Model';
+  const assetName = props._model3dNames?.[0] || props._pointcloudNames?.[0];
+  const name = assetName || props.name || featureTitle.value || 'Model';
   const payload = { models: model3dUrls.value, pointclouds: pointcloudUrls.value, name };
   if (props._x) payload.x = props._x;
   if (props._y) payload.y = props._y;

@@ -148,7 +148,7 @@
 </template>
 
 <script setup>
-import { ref, inject } from 'vue';
+import { ref, inject, onUnmounted } from 'vue';
 import { useMapStore } from '../stores/map/mapStore';
 import { useLayerStore } from '../stores/map/layerStore';
 import { useSettingsStore } from '../stores/settingsStore';
@@ -239,7 +239,10 @@ const {
   csvModalOpen, csvModalFileName, csvModalColumns, csvModalSampleRows, csvModalPreX, csvModalPreY,
   handleDragOver, handleDragLeave, handleDrop, handleRibbonFiles,
   handleCsvConfirm, handleCsvCancel,
+  cleanup: cleanupFileDropHandler,
 } = useFileDropHandler(mapStore, layerManagerRef);
+
+onUnmounted(cleanupFileDropHandler);
 
 // ── Tool orchestration ────────────────────────────────────────────────────────
 // Closes all exclusive tools so only one is active at a time.

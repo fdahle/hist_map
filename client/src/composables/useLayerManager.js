@@ -187,6 +187,7 @@ export function useLayerManager(map) {
     cleanupSelection();
     layerStore.layers.forEach((l) => {
       if (l.layerInstance) map.removeLayer(l.layerInstance);
+      if (l.url?.startsWith('blob:')) URL.revokeObjectURL(l.url);
     });
     layerStore.reset();
   };

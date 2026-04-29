@@ -67,6 +67,7 @@ export function fileTypeToLayerType(fileType) {
     case 'geotiff':    return 'geotiff';
     case 'model':      return 'model';
     case 'pointcloud': return 'pointcloud';
+    case 'csv':        return 'csv';
     default:           return 'unknown';
   }
 }
@@ -133,6 +134,65 @@ export async function deleteLayer(layersDir, id) {
   validateLayerId(id);
   const layerDir = resolveInDir(layersDir, id);
   await fs.rm(layerDir, { recursive: true, force: true });
+
+  // Scrub the deleted ID from featureLinks and csvLinks of all remaining layers
+  let entries;
+  try { entries = await fs.readdir(layersDir, { withFileTypes: true }); } catch { return; }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const linksPath = resolveInDir(layersDir, entry.name, `${entry.name}.links.json`);
+    let links;
+    try { links = JSON.parse(await fs.readFile(linksPath, 'utf8')); } catch { continue; }
+
+    let changed = false;
+    if (Array.isArray(links.featureLinks)) {
+      for (const fl of links.featureLinks) {
+        if (Array.isArray(fl.modelLayerIds) && fl.modelLayerIds.includes(id)) {
+          fl.modelLayerIds = fl.modelLayerIds.filter(lid => lid !== id);
+          changed = true;
+        }
+        if (Array.isArray(fl.pointcloudLayerIds) && fl.pointcloudLayerIds.includes(id)) {
+          fl.pointcloudLayerIds = fl.pointcloudLayerIds.filter(lid => lid !== id);
+          changed = true;
+        }
+      }
+      // Drop feature entries that have no links left
+      const before = links.featureLinks.length;
+      links.featureLinks = links.featureLinks.filter(
+        fl => fl.modelLayerIds.length > 0 || fl.pointcloudLayerIds.length > 0
+      );
+      if (links.featureLinks.length !== before) changed = true;
+    }
+    if (Array.isArray(links.csvLinks)) {
+      const before = links.csvLinks.length;
+      links.csvLinks = links.csvLinks.filter(cl => cl.dataLayerId !== id);
+      if (links.csvLinks.length !== before) changed = true;
+    }
+
+    if (changed) {
+      await fs.writeFile(linksPath, JSON.stringify(links, null, 2), 'utf8');
+    }
+  }
+}
+
+// ── Links sidecar ─────────────────────────────────────────────────────────────
+// Each 2D layer can have a {uuid}.links.json that stores references to
+// linked 3D layers (per feature) and CSV data layers (per layer).
+// The GeoJSON file itself is never modified.
+
+export async function readLinks(layersDir, id) {
+  const linksPath = resolveInDir(layersDir, id, `${id}.links.json`);
+  try {
+    const raw = await fs.readFile(linksPath, 'utf8');
+    return JSON.parse(raw);
+  } catch {
+    return { csvLinks: [], featureLinks: [] };
+  }
+}
+
+export async function writeLinks(layersDir, id, links) {
+  const linksPath = resolveInDir(layersDir, id, `${id}.links.json`);
+  await fs.writeFile(linksPath, JSON.stringify(links, null, 2), 'utf8');
 }
 
 // ── Config serialisation ───────────────────────────────────────────────────────

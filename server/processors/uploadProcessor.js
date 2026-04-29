@@ -78,7 +78,11 @@ export function parseGeoFile(raw, filePath) {
   if (filePath.endsWith('.geojsonl')) {
     const lines = raw.split('\n').filter(Boolean);
     const header = lines.length > 0 ? JSON.parse(lines[0]) : {};
-    return { features: lines.slice(1).map(l => JSON.parse(l)), header };
+    const features = lines.slice(1).map((l, i) => {
+      try { return JSON.parse(l); }
+      catch { console.warn(`[parseGeoFile] Skipping malformed NDJSON line ${i + 2} in ${filePath}`); return null; }
+    }).filter(Boolean);
+    return { features, header };
   }
   const { features = [], ...rest } = JSON.parse(raw);
   return { features, header: rest };
@@ -96,6 +100,11 @@ export function serializeGeoFile(features, header, filePath) {
 
 /**
  * Process an array of uploaded files into UUID-based layer storage.
+ *
+ * New behaviour (v2): every file type becomes a standalone layer.
+ * Models and point clouds are no longer grouped as sub-files of a GeoJSON.
+ * Linking is now managed separately via the links.json sidecar.
+ *
  * @param {Array<{originalname:string,buffer:Buffer}>} files
  * @param {string} layersDir  — absolute path to data/layers/
  * @param {Object} allSettings — per-filename settings from the upload modal
@@ -116,17 +125,16 @@ export async function processUploadBatch(files, layersDir, allSettings = {}) {
 
   const results = [];
 
-  if (byType.geojson.length > 0) {
-    for (const geoFile of byType.geojson) {
-      results.push(await _processGeoJsonLayer(geoFile, byType.model, byType.pointcloud, fileMap, layersDir, allSettings));
-    }
-  } else {
-    for (const modelFile of byType.model) {
-      results.push(await _processStandaloneModel(modelFile, fileMap, layersDir, allSettings));
-    }
-    for (const pcFile of byType.pointcloud) {
-      results.push(await _processStandalonePointcloud(pcFile, layersDir, allSettings));
-    }
+  for (const geoFile of byType.geojson) {
+    results.push(await _processGeoJsonLayer(geoFile, fileMap, layersDir, allSettings));
+  }
+
+  for (const modelFile of byType.model) {
+    results.push(await _processStandaloneModel(modelFile, fileMap, layersDir, allSettings));
+  }
+
+  for (const pcFile of byType.pointcloud) {
+    results.push(await _processStandalonePointcloud(pcFile, layersDir, allSettings));
   }
 
   for (const tifFile of byType.geotiff) {
@@ -134,7 +142,7 @@ export async function processUploadBatch(files, layersDir, allSettings = {}) {
   }
 
   for (const csvFile of byType.csv) {
-    results.push(await _processCsvLayer(csvFile, layersDir, allSettings));
+    results.push(await _processCsvDataLayer(csvFile, layersDir, allSettings));
   }
 
   return results;
@@ -142,31 +150,13 @@ export async function processUploadBatch(files, layersDir, allSettings = {}) {
 
 // ── GeoJSON layer ──────────────────────────────────────────────────────────────
 
-async function _processGeoJsonLayer(geoFile, modelFiles, pointcloudFiles, fileMap, layersDir, allSettings) {
+async function _processGeoJsonLayer(geoFile, fileMap, layersDir, allSettings) {
   const id       = uuidv4();
   const layerDir = path.join(layersDir, id);
   await fs.mkdir(layerDir, { recursive: true });
 
   const settings = allSettings[geoFile.originalname] ?? {};
   const meta     = createLayerMeta({ id, originalName: geoFile.originalname, fileType: 'geojson', options: settings });
-
-  const modelMap      = new Map();
-  const pointcloudMap = new Map();
-
-  for (const modelFile of modelFiles) {
-    const subRes = await _saveModelSubFile(modelFile, fileMap, id, layerDir);
-    modelMap.set(path.parse(modelFile.originalname).name, subRes.url);
-    meta.subFiles.push(subRes.subMeta);
-  }
-
-  for (const pcFile of pointcloudFiles) {
-    const subId  = uuidv4();
-    const ext    = pointcloudExt(pcFile.originalname);
-    await fs.writeFile(path.join(layerDir, `${subId}${ext}`), pcFile.buffer);
-    const url    = `data/layers/${id}/${subId}${ext}`;
-    pointcloudMap.set(path.parse(pcFile.originalname).name, url);
-    meta.subFiles.push(createSubFileMeta({ id: subId, originalName: pcFile.originalname, fileType: 'pointcloud', role: 'pointcloud' }));
-  }
 
   let geojson;
   try {
@@ -184,8 +174,6 @@ async function _processGeoJsonLayer(geoFile, modelFiles, pointcloudFiles, fileMa
     simplifyTolerance:   shapeCfg.simplifyTolerance   ?? 50,
     coordinatePrecision: shapeCfg.coordinatePrecision ?? 0,
     sourceCrs:           shapeCfg.sourceCrs           ?? null,
-    modelMap,
-    pointcloudMap,
   });
 
   if (settings.keepOriginal) {
@@ -442,82 +430,43 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
   };
 }
 
-// ── CSV layer ──────────────────────────────────────────────────────────────────
+// ── CSV data layer ─────────────────────────────────────────────────────────────
+// CSV files are stored as-is and treated as attribute data to be linked to
+// GeoJSON layers via the links.json sidecar. No coordinate conversion is done.
 
-async function _processCsvLayer(csvFile, layersDir, allSettings) {
-  const settings    = allSettings[csvFile.originalname] ?? {};
-  const csvSettings = settings.csvSettings ?? {};
-  const xCol        = csvSettings.xColumn ?? '';
-  const yCol        = csvSettings.yColumn ?? '';
-
-  if (!xCol || !yCol) {
-    throw new Error(`${csvFile.originalname}: X and Y column names must be specified.`);
-  }
-
-  // Parse CSV using the csv-parse library which correctly handles quoted fields,
-  // escaped delimiters, and multi-line values.
-  const text = csvFile.buffer.toString('utf8');
-  let records;
-  try {
-    records = csvParse(text, { columns: true, skip_empty_lines: true, trim: true, relax_quotes: true });
-  } catch (err) {
-    throw new Error(`${csvFile.originalname}: CSV parse error — ${err.message}`);
-  }
-  if (records.length === 0) throw new Error(`${csvFile.originalname}: CSV has no data rows.`);
-
-  const headers = Object.keys(records[0]);
-  if (!headers.includes(xCol)) throw new Error(`${csvFile.originalname}: column "${xCol}" not found.`);
-  if (!headers.includes(yCol)) throw new Error(`${csvFile.originalname}: column "${yCol}" not found.`);
-
-  const features = [];
-  for (const row of records) {
-    const x = parseFloat(row[xCol]);
-    const y = parseFloat(row[yCol]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue; // skip bad rows
-
-    const props = {};
-    headers.forEach((h) => { if (h !== xCol && h !== yCol) props[h] = row[h] ?? ''; });
-
-    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [x, y] }, properties: props });
-  }
-
-  const geojson = { type: 'FeatureCollection', features };
-
+async function _processCsvDataLayer(csvFile, layersDir, allSettings) {
   const id       = uuidv4();
   const layerDir = path.join(layersDir, id);
   await fs.mkdir(layerDir, { recursive: true });
 
-  // Apply optional processing (reproject / simplify) via shapeProcessor
-  const { geojson: processed, steps: procSteps, sourceCrs, targetCrs } = processGeoJsonObject(geojson, {
-    ...(settings.shapeSettings ?? {}),
-    sourceCrs: csvSettings.crs || null,
-  });
+  const settings = allSettings[csvFile.originalname] ?? {};
+  const meta     = createLayerMeta({ id, originalName: csvFile.originalname, fileType: 'csv', options: settings });
+  meta.extension = '.csv';
 
-  if (settings.keepOriginal) {
-    const backupName = `original_${id}.csv`;
-    await fs.writeFile(path.join(layerDir, backupName), csvFile.buffer);
-  }
+  await fs.writeFile(path.join(layerDir, `${id}.csv`), csvFile.buffer);
 
-  await fs.writeFile(path.join(layerDir, `${id}.geojson`), JSON.stringify(processed));
+  // Read first line to detect column headers for preview
+  const text = csvFile.buffer.toString('utf8');
+  const firstNewline = text.indexOf('\n');
+  const headerLine   = firstNewline !== -1 ? text.slice(0, firstNewline).trim() : text.trim();
+  const delimiter    = detectCsvDelimiter(headerLine);
+  try {
+    const records = csvParse(text, { columns: true, skip_empty_lines: true, trim: true, relax_quotes: true, to: 1, delimiter });
+    if (records.length > 0) meta.csvColumns = Object.keys(records[0]);
+  } catch { /* non-fatal — columns will be detected on demand */ }
 
-  const meta = createLayerMeta({
-    id,
-    originalName: csvFile.originalname,
-    fileType:     'geojson',
-    options:      { ...settings, sourceFormat: 'csv', xColumn: xCol, yColumn: yCol },
-  });
-  // Override: stored file is .geojson even though it came from a .csv
-  meta.extension    = '.geojson';
-  meta.featureCount = processed.features?.length ?? features.length;
-  meta.sourceCrs    = sourceCrs ?? null;
-  meta.targetCrs    = targetCrs ?? null;
-  meta.featureIndex = processed.features?.map((f, i) => ({ id: f.properties?._featureId ?? null, index: i })) ?? null;
-  if (settings.keepOriginal) meta.originalBackup = `original_${id}.csv`;
-  const csvStep = `Converted ${features.length} rows from CSV to GeoJSON Points`;
-  meta.processingLog = [csvStep, ...procSteps];
+  meta.processingLog = [`Saved CSV data file: ${csvFile.originalname}`];
   await writeLayerMeta(layersDir, id, meta);
 
-  return { id, filename: csvFile.originalname, type: 'geojson', dataPath: `data/layers/${id}/${id}.geojson`, featureCount: meta.featureCount, sourceCrs, targetCrs, steps: meta.processingLog };
+  return {
+    id,
+    type:        'csv',
+    originalName: csvFile.originalname,
+    displayName:  meta.layerConfig.displayName,
+    dataPath:    `data/layers/${id}/${id}.csv`,
+    steps:       meta.processingLog,
+    status:      'ready',
+  };
 }
 
 // ── Sub-file addition (for POST /admin/layers/:id/subfiles) ───────────────────

@@ -13,9 +13,19 @@ export const useMapStore = defineStore("map", () => {
   const mouseCoords = ref(null); // Lat/Lng
   const projectedCoords = ref(null); // X/Y (Meters)
 
+  // EventsKey handles for cleanup when setMap is called again
+  let _moveendKey = null;
+  let _pointermoveKey = null;
+
   // --- ACTIONS ---
 
   const setMap = (map) => {
+    // Remove listeners from previous map instance before registering new ones
+    if (mapInstance.value) {
+      if (_moveendKey) mapInstance.value.un("moveend", _moveendKey);
+      if (_pointermoveKey) mapInstance.value.un("pointermove", _pointermoveKey);
+    }
+
     // Store raw OpenLayers map instance
     mapInstance.value = markRaw(map);
 
@@ -33,10 +43,10 @@ export const useMapStore = defineStore("map", () => {
     }
 
     // 2. Listen for Move Events
-    map.on("moveend", () => {
+    _moveendKey = map.on("moveend", () => {
       const v = map.getView();
       zoom.value = v.getZoom();
-      
+
       const c = v.getCenter();
       if (c) {
           // Convert Projected Center back to Lat/Lon for display
@@ -47,16 +57,16 @@ export const useMapStore = defineStore("map", () => {
 
     // 3. Throttled Mouse Movement tracking (reduce CPU during zoom/pan)
     let lastPointerUpdate = 0;
-    
-    map.on("pointermove", (e) => {
+
+    _pointermoveKey = map.on("pointermove", (e) => {
       if (e.dragging) return;
-      
+
       const now = Date.now();
       if (now - lastPointerUpdate < MAP_POINTER_THROTTLE_MS) return;
       lastPointerUpdate = now;
-      
+
       const coords = e.coordinate;
-      
+
       // Update Projected (Raw X/Y)
       projectedCoords.value = { x: coords[0], y: coords[1] };
 

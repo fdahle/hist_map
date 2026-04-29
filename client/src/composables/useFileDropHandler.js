@@ -152,19 +152,24 @@ export function useFileDropHandler(mapStore, layerManagerRef) {
         }
 
         const blobUrl = URL.createObjectURL(file);
-        await layerManagerRef.value.processLayer(
-          {
-            type: 'geotiff', url: blobUrl, file, name: layerName, visible: true,
-            isUserAdded: true,
-            bandCount: metadata.bands,
-            dataMin: metadata.dataMin,
-            dataMax: metadata.dataMax,
-            extent: metadata.extent,
-            tiffProjection: metadata.projection,
-            noDataValue: metadata.noDataValue,
-          },
-          'overlay',
-        );
+        try {
+          await layerManagerRef.value.processLayer(
+            {
+              type: 'geotiff', url: blobUrl, file, name: layerName, visible: true,
+              isUserAdded: true,
+              bandCount: metadata.bands,
+              dataMin: metadata.dataMin,
+              dataMax: metadata.dataMax,
+              extent: metadata.extent,
+              tiffProjection: metadata.projection,
+              noDataValue: metadata.noDataValue,
+            },
+            'overlay',
+          );
+        } catch (processErr) {
+          URL.revokeObjectURL(blobUrl);
+          throw processErr;
+        }
 
         showNotification(`Added layer: ${layerName}`, 'success');
 
@@ -190,10 +195,15 @@ export function useFileDropHandler(mapStore, layerManagerRef) {
       await new Promise((r) => requestAnimationFrame(r));
       try {
         const blobUrl = URL.createObjectURL(file);
-        await layerManagerRef.value.processLayer(
-          { type: 'geojson', url: blobUrl, name: layerName, visible: true, isUserAdded: true },
-          'overlay',
-        );
+        try {
+          await layerManagerRef.value.processLayer(
+            { type: 'geojson', url: blobUrl, name: layerName, visible: true, isUserAdded: true },
+            'overlay',
+          );
+        } catch (processErr) {
+          URL.revokeObjectURL(blobUrl);
+          throw processErr;
+        }
         showNotification(`Added layer: ${layerName}`, 'success');
       } catch (e) {
         showNotification(`Failed to load ${layerName}: ${e.message}`, 'error');
@@ -247,10 +257,15 @@ export function useFileDropHandler(mapStore, layerManagerRef) {
 
         const blob = new Blob([JSON.stringify(geojson)], { type: 'application/json' });
         const blobUrl = URL.createObjectURL(blob);
-        await layerManagerRef.value.processLayer(
-          { type: 'geojson', url: blobUrl, name: layerName, visible: true, isUserAdded: true },
-          'overlay',
-        );
+        try {
+          await layerManagerRef.value.processLayer(
+            { type: 'geojson', url: blobUrl, name: layerName, visible: true, isUserAdded: true },
+            'overlay',
+          );
+        } catch (processErr) {
+          URL.revokeObjectURL(blobUrl);
+          throw processErr;
+        }
 
         showNotification(
           skipped > 0
@@ -270,6 +285,8 @@ export function useFileDropHandler(mapStore, layerManagerRef) {
     }
   };
 
+  const cleanup = () => clearTimeout(notificationTimer);
+
   return {
     isDragging,
     notification,
@@ -286,5 +303,6 @@ export function useFileDropHandler(mapStore, layerManagerRef) {
     handleCsvConfirm,
     handleCsvCancel,
     showNotification,
+    cleanup,
   };
 }

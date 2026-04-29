@@ -1,0 +1,376 @@
+<template>
+  <section class="tab-section">
+    <!-- ── Projection ─────────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3 class="card-title">Projection</h3>
+
+      <div class="field-row">
+        <div class="field field-grow">
+          <label>CRS (EPSG code or proj string)</label>
+          <input v-model="draft.crs" type="text" placeholder="EPSG:3857"
+            @blur="draft.crs = (draft.crs || '').trim() || 'EPSG:3857'" />
+          <p v-if="projectionChanged" class="field-hint field-hint-warn">
+            CRS changed from <strong>{{ loadedCrs }}</strong> — reload the map to apply.
+          </p>
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field field-grow">
+          <label>Proj4 definition <span class="field-hint-inline">(only needed when the EPSG code isn't auto-recognized by proj4js)</span></label>
+          <input v-model="draft.projection_params.proj_string" type="text"
+            placeholder="+proj=utm +zone=32 +datum=WGS84 …" />
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field field-grow">
+          <label>Projection extent <span class="field-hint-inline">(optional — [minX, minY, maxX, maxY] in projected units)</span></label>
+          <input v-model="projExtentStr" type="text" placeholder="e.g. -180,-90,180,90"
+            @blur="onProjExtentBlur" :class="{ 'input-error': projExtentError }" />
+          <p v-if="projExtentError" class="field-hint field-hint-error">{{ projExtentError }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Initial View ───────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3 class="card-title">Initial View</h3>
+
+      <div class="field-row">
+        <div class="field">
+          <label>{{ centerXLabel }}</label>
+          <input v-model.number="draft.view.center[0]" type="number" step="0.0001" placeholder="0" />
+        </div>
+        <div class="field">
+          <label>{{ centerYLabel }}</label>
+          <input v-model.number="draft.view.center[1]" type="number" step="0.0001" placeholder="0" />
+        </div>
+        <div class="field field-sm">
+          <label>Zoom</label>
+          <input v-model.number="draft.view.zoom" type="number" min="0" max="28" step="0.5" placeholder="7" />
+        </div>
+      </div>
+    </div>
+
+    <!-- ── View Constraints ──────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3 class="card-title">View Constraints</h3>
+
+      <div class="field-row">
+        <div class="field field-sm">
+          <label>Min zoom</label>
+          <input v-model.number="draft.view.minZoom" type="number" min="0" max="28" step="1" placeholder="0" />
+        </div>
+        <div class="field field-sm">
+          <label>Max zoom</label>
+          <input v-model.number="draft.view.maxZoom" type="number" min="0" max="28" step="1" placeholder="28" />
+        </div>
+      </div>
+
+      <div class="field-row">
+        <div class="field field-grow">
+          <label>View extent <span class="field-hint-inline">(optional lock — [minX, minY, maxX, maxY])</span></label>
+          <input v-model="viewExtentStr" type="text" placeholder="e.g. -180,-90,180,90"
+            @blur="onViewExtentBlur" :class="{ 'input-error': viewExtentError }" />
+          <p v-if="viewExtentError" class="field-hint field-hint-error">{{ viewExtentError }}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Background ─────────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <h3 class="card-title">Background</h3>
+      <div class="field-row">
+        <div class="field">
+          <label class="checkbox-label">
+            <div class="toggle-switch">
+              <input id="osm-bg" v-model="osmBackground" type="checkbox" />
+              <label for="osm-bg" class="slider"></label>
+            </div>
+            OSM background
+            <span class="field-hint-inline">(OpenStreetMap tile layer shown behind all other layers)</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Basemaps ───────────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title card-title-inline">Basemaps</h3>
+          <p class="card-desc">Tile, WMS, or WMTS layers shown in the base layer switcher.</p>
+        </div>
+        <button class="btn-add-sm" @click="openAddBasemap">+ Add Basemap</button>
+      </div>
+
+      <div v-if="basemapWarnings.length" class="warn-list">
+        <p v-for="w in basemapWarnings" :key="w" class="warn-line">⚠ {{ w }}</p>
+      </div>
+
+      <div v-if="!draft.basemaps.length" class="empty-state">
+        No basemaps configured. Add one or enable the OSM background above.
+      </div>
+      <div v-else class="layer-list">
+        <div v-for="(layer, idx) in draft.basemaps" :key="idx" class="layer-row">
+          <span class="type-badge" :class="`type-${layer.type}`">{{ layer.type }}</span>
+          <span class="vis-dot" :class="{ visible: layer.visible }" :title="layer.visible ? 'Visible' : 'Hidden'"></span>
+          <div class="layer-info">
+            <span class="layer-name">{{ layer.name }}</span>
+            <span class="layer-url">{{ truncateUrl(layer.url) }}</span>
+          </div>
+          <span class="order-chip">{{ layer.order }}</span>
+          <div class="row-actions">
+            <button class="action-btn" title="Edit" @click="openEditBasemap(idx)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button class="action-btn action-btn-danger" title="Delete" @click="removeBasemap(idx)">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Layer editor modal (reused for both basemaps and overlay layers) -->
+    <LayerEditorModal
+      :is-open="layerModalOpen"
+      :layer="layerModalValue"
+      :layer-group="layerModalGroup"
+      :auth-header="authHeader"
+      @save="onLayerModalSave"
+      @cancel="layerModalOpen = false"
+    />
+  </section>
+</template>
+
+<script setup>
+import { ref, computed, inject, watch } from 'vue';
+import LayerEditorModal from '../../modals/admin/LayerEditorModal.vue';
+
+// ── Injected from AdminView ────────────────────────────────────────────────────
+const draft       = inject('draft');
+const osmBackground = inject('osmBackground');
+const loadedCrs   = inject('loadedCrs');
+const authHeader  = inject('authHeader');
+
+// ── Projection changed warning ─────────────────────────────────────────────────
+const projectionChanged = computed(() =>
+  loadedCrs.value && draft.value.crs && draft.value.crs !== loadedCrs.value
+);
+
+// ── Geographic vs projected CRS ────────────────────────────────────────────────
+const GEOGRAPHIC_EPSG = new Set(['EPSG:4326', 'EPSG:4269', 'EPSG:4258', 'EPSG:4979', 'CRS:84', 'WGS84']);
+const isGeographic = computed(() => {
+  const crs  = (draft.value.crs || '').trim().toUpperCase();
+  const proj = (draft.value.projection_params?.proj_string || '').toLowerCase();
+  return GEOGRAPHIC_EPSG.has(crs) || proj.includes('+proj=longlat') || proj.includes('+proj=latlong');
+});
+const centerXLabel = computed(() => isGeographic.value ? 'Longitude (center)' : 'X (center)');
+const centerYLabel = computed(() => isGeographic.value ? 'Latitude (center)' : 'Y (center)');
+
+// ── Extent string helpers ──────────────────────────────────────────────────────
+function extentToStr(arr) {
+  if (!arr || !Array.isArray(arr)) return '';
+  return arr.join(', ');
+}
+function parseExtent(str) {
+  if (!str?.trim()) return null;
+  const parts = str.split(',').map(s => parseFloat(s.trim()));
+  if (parts.length !== 4 || parts.some(isNaN)) return undefined; // undefined = invalid
+  return parts;
+}
+
+// Projection extent
+const projExtentStr = ref(extentToStr(draft.value.projection_params?.extent));
+const projExtentError = ref('');
+function onProjExtentBlur() {
+  const v = projExtentStr.value.trim();
+  if (!v) { draft.value.projection_params.extent = null; projExtentError.value = ''; return; }
+  const parsed = parseExtent(v);
+  if (parsed === undefined) { projExtentError.value = 'Must be 4 numbers: minX, minY, maxX, maxY'; return; }
+  projExtentError.value = '';
+  draft.value.projection_params.extent = parsed;
+}
+
+// View extent
+const viewExtentStr = ref(extentToStr(draft.value.view?.extent));
+const viewExtentError = ref('');
+function onViewExtentBlur() {
+  const v = viewExtentStr.value.trim();
+  if (!v) { draft.value.view.extent = null; viewExtentError.value = ''; return; }
+  const parsed = parseExtent(v);
+  if (parsed === undefined) { viewExtentError.value = 'Must be 4 numbers: minLng, minLat, maxLng, maxLat'; return; }
+  viewExtentError.value = '';
+  draft.value.view.extent = parsed;
+}
+
+// Keep string fields in sync when draft changes externally (e.g. initial load)
+watch(() => draft.value.projection_params?.extent, (val) => {
+  projExtentStr.value = extentToStr(val);
+}, { immediate: true });
+watch(() => draft.value.view?.extent, (val) => {
+  viewExtentStr.value = extentToStr(val);
+}, { immediate: true });
+
+// ── Basemap warnings ───────────────────────────────────────────────────────────
+const basemapWarnings = computed(() => {
+  const layers = draft.value.basemaps ?? [];
+  const warns = [];
+  const visCount = layers.filter(l => l.visible).length;
+  if (visCount > 1) warns.push(`${visCount} basemaps are marked visible — exactly one should be visible at a time.`);
+  if (layers.length > 0 && visCount === 0) warns.push('No basemap is set as visible — the map will have no background.');
+  const orders = layers.map(l => l.order);
+  const dupes = orders.filter((o, i) => orders.indexOf(o) !== i);
+  if (dupes.length) warns.push(`Duplicate order values: ${[...new Set(dupes)].join(', ')}.`);
+  return warns;
+});
+
+// ── Layer editor modal ─────────────────────────────────────────────────────────
+const layerModalOpen  = ref(false);
+const layerModalValue = ref(null);
+const layerModalGroup = ref('base');
+let   layerModalIdx   = -1;
+
+function openAddBasemap() {
+  layerModalValue.value = null;
+  layerModalGroup.value = 'base';
+  layerModalIdx = -1;
+  layerModalOpen.value = true;
+}
+function openEditBasemap(idx) {
+  layerModalValue.value = { ...draft.value.basemaps[idx] };
+  layerModalGroup.value = 'base';
+  layerModalIdx = idx;
+  layerModalOpen.value = true;
+}
+function removeBasemap(idx) {
+  draft.value.basemaps.splice(idx, 1);
+}
+function onLayerModalSave(layer) {
+  if (layerModalIdx >= 0) {
+    draft.value.basemaps[layerModalIdx] = layer;
+  } else {
+    draft.value.basemaps.push(layer);
+  }
+  layerModalOpen.value = false;
+}
+
+// ── URL display helper ─────────────────────────────────────────────────────────
+function truncateUrl(url) {
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    const p = u.pathname.length > 30 ? '…' + u.pathname.slice(-28) : u.pathname;
+    return u.hostname + p;
+  } catch {
+    return url.length > 50 ? url.slice(0, 48) + '…' : url;
+  }
+}
+</script>
+
+<style scoped>
+.tab-section { max-width: 900px; display: flex; flex-direction: column; gap: 1rem; }
+
+.settings-card {
+  border: 1px solid var(--admin-border, #e0e0e0); border-radius: 8px;
+  background: var(--admin-surface, #fff); padding: 1rem 1.1rem;
+}
+
+.card-header {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 0.85rem;
+}
+.card-title { font-size: 0.9rem; font-weight: 600; margin: 0 0 0.7rem; }
+.card-title-inline { margin-bottom: 0.1rem; }
+.card-desc  { font-size: 0.78rem; color: var(--admin-muted, #777); margin: 0; }
+
+.field-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.65rem; }
+.field-row:last-child { margin-bottom: 0; }
+.field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 140px; }
+.field-grow { flex: 1; }
+.field-sm { width: 100px; min-width: 100px; }
+
+.field label { font-size: 0.78rem; font-weight: 500; color: var(--admin-text, #333); }
+.field input {
+  padding: 0.35rem 0.5rem; border: 1px solid var(--admin-input-border, #ccc);
+  border-radius: 5px; font-size: 0.82rem; background: var(--admin-input-bg, #fff); color: var(--admin-text, #1a1a1a);
+}
+.field input:focus { outline: 2px solid #3b82f6; border-color: transparent; }
+.input-error { border-color: #ef4444 !important; }
+
+.field-hint-inline { font-size: 0.72rem; color: var(--admin-muted, #999); font-weight: 400; }
+.field-hint { font-size: 0.75rem; margin: 0.2rem 0 0; }
+.field-hint-warn  { color: #b45309; }
+.field-hint-error { color: #ef4444; }
+
+.checkbox-label {
+  display: flex; align-items: center; gap: 0.55rem; font-size: 0.82rem; cursor: pointer;
+  color: var(--admin-text, #333);
+}
+.toggle-switch { display: flex; align-items: center; flex-shrink: 0; }
+.toggle-switch input[type=checkbox] { display: none; }
+.slider {
+  width: 34px; height: 18px; border-radius: 9px; background: var(--admin-border, #ccc);
+  cursor: pointer; position: relative; transition: background 0.15s; display: block;
+}
+.slider::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%; background: #fff; transition: transform 0.15s;
+}
+input:checked + .slider { background: #3b82f6; }
+input:checked + .slider::after { transform: translateX(16px); }
+
+.btn-add-sm {
+  padding: 0.35rem 0.75rem; border-radius: 6px; background: #3b82f6;
+  color: #fff; border: none; font-size: 0.78rem; font-weight: 500; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.btn-add-sm:hover { background: #2563eb; }
+
+.warn-list { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.75rem; }
+.warn-line {
+  margin: 0; padding: 0.3rem 0.6rem; font-size: 0.78rem;
+  color: #b45309; background: rgba(217,119,6,0.09); border: 1px solid rgba(217,119,6,0.25); border-radius: 4px;
+}
+
+.empty-state { padding: 1rem; text-align: center; font-size: 0.82rem; color: var(--admin-muted, #777); background: var(--admin-bg, #f3f4f6); border-radius: 6px; }
+
+.layer-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.layer-row {
+  display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.65rem;
+  border: 1px solid var(--admin-border, #e0e0e0); border-radius: 6px; background: var(--admin-bg, #f9fafb);
+}
+
+.type-badge {
+  font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+  padding: 0.12rem 0.35rem; border-radius: 3px; background: var(--admin-border, #e0e0e0);
+  color: var(--admin-muted, #777); flex-shrink: 0;
+}
+.type-tile  { background: rgba(99,102,241,0.15);  color: #6366f1; }
+.type-wmts  { background: rgba(168,85,247,0.15);  color: #a855f7; }
+.type-wms   { background: rgba(236,72,153,0.15);  color: #ec4899; }
+
+.vis-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--admin-border, #ccc); flex-shrink: 0; }
+.vis-dot.visible { background: #22c55e; }
+
+.layer-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.layer-name { font-size: 0.83rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layer-url  { font-size: 0.72rem; color: var(--admin-muted, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.order-chip { font-size: 0.72rem; color: var(--admin-muted, #999); flex-shrink: 0; min-width: 20px; text-align: center; }
+
+.row-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
+.action-btn {
+  display: flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+  border: 1px solid var(--admin-border, #e0e0e0); border-radius: 5px;
+  background: transparent; color: var(--admin-muted, #777); cursor: pointer;
+}
+.action-btn:hover { color: var(--admin-text, #1a1a1a); border-color: var(--admin-muted, #999); }
+.action-btn-danger:hover { color: #ef4444; border-color: #fca5a5; }
+</style>

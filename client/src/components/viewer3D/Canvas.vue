@@ -18,6 +18,7 @@ import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { useSettingsStore } from '@/stores/settingsStore.js';
 import { storeToRefs } from 'pinia';
 import { appConfig } from '@/utils/config.js';
+import { debounce } from '@/utils/helpers.js';
 
 const props = defineProps({
   modelUrls: {
@@ -155,6 +156,8 @@ const cancelLoading = () => {
 const mouse = new THREE.Vector2();
 const measurementMarkers = [];
 
+const debouncedHandleResize = debounce(() => handleResize(), 150);
+
 const initViewer = () => {
   if (!viewerRef.value) return;
 
@@ -225,7 +228,7 @@ const initViewer = () => {
   animate();
 
   // Handle resize
-  window.addEventListener('resize', handleResize);
+  window.addEventListener('resize', debouncedHandleResize);
 
   // Handle mouse clicks for measurements
   newRenderer.domElement.addEventListener('click', onCanvasClick);
@@ -957,6 +960,121 @@ const loadLASFile = async (file) => {
         if (!loadingCancelled.value) {
           emit('loading-error', { url: file.name, error: e.message });
         }
+        resolve();
+      };
+    }),
+    cancelPromise,
+  ]);
+
+  worker.terminate();
+  if (activeWorker.value === worker)       activeWorker.value       = null;
+  if (activeWorkerCancel.value === cancelResolve) activeWorkerCancel.value = null;
+};
+
+const loadPointCloudFromUrl = async (url, pcIndex = 0) => {
+  loadingCancelled.value = false;
+  const fileName = url.split('/').pop() || 'pointcloud';
+
+  emit('loading-progress', { url, index: pcIndex, loaded: 0, total: 0, progress: 0, status: 'reading' });
+
+  let arrayBuffer;
+  try {
+    const fullUrl = url.startsWith('http') ? url : `${appConfig.apiUrl}/${url}`;
+    const response = await fetch(fullUrl);
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+    const contentLength = response.headers.get('content-length');
+    const total = parseInt(contentLength, 10) || 0;
+    let loaded = 0;
+
+    const reader = response.body.getReader();
+    activeStreamReader = reader;
+    const chunks = [];
+
+    while (true) {
+      if (loadingCancelled.value) { reader.cancel(); activeStreamReader = null; return; }
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.length;
+      if (total) {
+        emit('loading-progress', { url, index: pcIndex, loaded, total, progress: Math.round((loaded / total) * 100), status: 'reading' });
+      }
+    }
+    activeStreamReader = null;
+    if (loadingCancelled.value) return;
+
+    const combined = new Uint8Array(loaded);
+    let pos = 0;
+    for (const chunk of chunks) { combined.set(chunk, pos); pos += chunk.length; }
+    arrayBuffer = combined.buffer;
+  } catch (e) {
+    if (!loadingCancelled.value) emit('loading-error', { url, error: e.message || 'Failed to fetch file' });
+    return;
+  }
+
+  if (loadingCancelled.value) return;
+
+  emit('loading-progress', { url, index: pcIndex, loaded: 0, total: arrayBuffer.byteLength, progress: 0, status: 'decompressing' });
+
+  const worker = new Worker(
+    new URL('../../workers/pointcloudWorker.js', import.meta.url),
+    { type: 'module' }
+  );
+  activeWorker.value = worker;
+
+  let cancelResolve;
+  const cancelPromise = new Promise((r) => { cancelResolve = r; });
+  activeWorkerCancel.value = cancelResolve;
+
+  worker.postMessage(
+    { arrayBuffer, fileName, maxPoints: 5_000_000 },
+    [arrayBuffer]
+  );
+
+  await Promise.race([
+    new Promise((resolve) => {
+      worker.onmessage = ({ data }) => {
+        if (data.type === 'progress') {
+          emit('loading-progress', {
+            url, index: pcIndex,
+            loaded: data.loaded ?? 0,
+            total:  data.total  ?? 0,
+            progress: data.progress ?? 0,
+            status: data.status,
+          });
+        } else if (data.type === 'result') {
+          if (!loadingCancelled.value) {
+            const positions = new Float32Array(data.posBuffer);
+            const rgbCopy   = data.colBuffer.slice(0);
+            const colors    = new Float32Array(data.colBuffer);
+            const geometry  = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
+
+            const material = new THREE.PointsMaterial({ size: 2, vertexColors: true, sizeAttenuation: false });
+            const pointCloud = new THREE.Points(geometry, material);
+            pointCloud.rotation.x = -Math.PI / 2;
+            pointCloud.userData.type                 = 'pointcloud';
+            pointCloud.userData.totalPoints          = data.totalPoints;
+            pointCloud.userData.sampledPoints        = data.sampledPoints;
+            pointCloud.userData.rgbBuffer            = rgbCopy;
+            pointCloud.userData.intensityBuffer      = data.intBuffer ?? null;
+            pointCloud.userData.classificationBuffer = data.clsBuffer ?? null;
+
+            scene.value.add(pointCloud);
+            adjustCameraToModel();
+
+            emit('model-loaded', { url, index: pcIndex, object: pointCloud, isFileDrop: false });
+          }
+          resolve();
+        } else if (data.type === 'error') {
+          if (!loadingCancelled.value) emit('loading-error', { url, error: data.message });
+          resolve();
+        }
+      };
+      worker.onerror = (e) => {
+        if (!loadingCancelled.value) emit('loading-error', { url, error: e.message });
         resolve();
       };
     }),
@@ -2438,21 +2556,37 @@ watch(() => props.modelUrls, (newUrls) => {
   }
 }, { immediate: false });
 
+// Watch for pointcloud URL changes
+watch(() => props.pointcloudUrls, (newUrls) => {
+  if (newUrls && newUrls.length > 0) {
+    newUrls.forEach((url, index) => {
+      loadPointCloudFromUrl(url, index);
+    });
+  }
+}, { immediate: false });
+
 onMounted(() => {
   if (viewerRef.value) {
     initViewer();
-    
+
     // Auto-load models after scene is ready
     if (props.modelUrls.length > 0) {
       props.modelUrls.forEach((url, index) => {
         loadModelFromUrl(url, index);
       });
     }
+
+    // Auto-load point clouds after scene is ready
+    if (props.pointcloudUrls.length > 0) {
+      props.pointcloudUrls.forEach((url, index) => {
+        loadPointCloudFromUrl(url, index);
+      });
+    }
   }
 });
 
 onUnmounted(() => {
-  window.removeEventListener('resize', handleResize);
+  window.removeEventListener('resize', debouncedHandleResize);
   if (renderer.value) {
     renderer.value.domElement.removeEventListener('click', onCanvasClick);
   }

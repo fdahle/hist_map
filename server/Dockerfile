@@ -1,16 +1,21 @@
-# Ubuntu 22.04 LTS — ships gdal-bin and pdal in its universe repo
+# Ubuntu 22.04 LTS — PDAL 2.6+ with writers.copc via UbuntuGIS unstable PPA
 FROM ubuntu:22.04
 
 # Prevent interactive prompts during apt installs
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install GDAL, PDAL, and supporting utilities in one layer
+# Add UbuntuGIS unstable PPA (provides PDAL 2.6+ with writers.copc support),
+# then install GDAL, PDAL and supporting utilities in one layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    ca-certificates \
+    gnupg \
+    && add-apt-repository -y ppa:ubuntugis/ubuntugis-unstable \
+    && apt-get update && apt-get install -y --no-install-recommends \
     gdal-bin \
     libgdal-dev \
     pdal \
     curl \
-    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 via the official NodeSource distribution

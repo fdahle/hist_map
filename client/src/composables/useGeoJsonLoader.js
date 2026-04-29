@@ -5,6 +5,7 @@ import VectorImageLayer from "ol/layer/VectorImage";
 import VectorSource from "ol/source/Vector";
 import { generateUUID } from "../utils/helpers";
 import { logger } from "../utils/logger";
+import { getApiUrl } from "../utils/config";
 import {
   buildLayerSharedStyle,
   buildGroupByStyleFunction,
@@ -26,6 +27,12 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
       { type: "module" },
     );
     activeWorkers.set(layer._layerId, worker);
+
+    worker.onerror = (event) => {
+      layerStore.setLayerError(layer._layerId, event.message ?? 'Worker crashed');
+      worker.terminate();
+      activeWorkers.delete(layer._layerId);
+    };
 
     worker.postMessage({
       url: layer.url,
@@ -180,6 +187,11 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
       if (type === "COMPLETE") {
         searchIndex.set(layer._layerId, layerSearchIndex);
 
+        // Resolve links.json sidecar → inject _model3dUrls / _pointcloudUrls into features
+        if (layer._layerId && source) {
+          applyLinksToFeatures(layer._layerId, source).catch(() => { /* non-fatal */ });
+        }
+
         const storeLayer = layerStore.layers.find((l) => l._layerId === layer._layerId);
 
         if (layer.groupBy) {
@@ -220,4 +232,61 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
   };
 
   return { loadGeoJsonLayer };
+}
+
+async function applyLinksToFeatures(layerId, source) {
+  const linksRes = await fetch(getApiUrl(`/layers/${layerId}/links`));
+  if (!linksRes.ok) return;
+  const links = await linksRes.json();
+  const featureLinks = links.featureLinks ?? [];
+  if (!featureLinks.length) return;
+
+  // Collect unique 3D layer IDs to resolve their file extensions
+  const allLayerIds = new Set();
+  for (const fl of featureLinks) {
+    (fl.modelLayerIds ?? []).forEach(id => allLayerIds.add(id));
+    (fl.pointcloudLayerIds ?? []).forEach(id => allLayerIds.add(id));
+  }
+  if (!allLayerIds.size) return;
+
+  // Fetch meta for each 3D layer (parallel), build id→{ url, name } map
+  const metaResults = await Promise.allSettled(
+    [...allLayerIds].map(async id => {
+      const res = await fetch(getApiUrl(`/layers/${id}/meta`));
+      if (!res.ok) return null;
+      const m = await res.json();
+      return { id, url: getApiUrl(`/data/layers/${id}/${id}${m.extension}`), name: m.name };
+    })
+  );
+  const urlMap = new Map();
+  for (const r of metaResults) {
+    if (r.status === 'fulfilled' && r.value) urlMap.set(r.value.id, r.value);
+  }
+
+  // Build featureId → { modelUrls, pcUrls, modelNames, pcNames } lookup
+  const linkMap = new Map();
+  for (const fl of featureLinks) {
+    const modelUrls  = (fl.modelLayerIds ?? []).map(id => urlMap.get(id)?.url).filter(Boolean);
+    const pcUrls     = (fl.pointcloudLayerIds ?? []).map(id => urlMap.get(id)?.url).filter(Boolean);
+    const modelNames = (fl.modelLayerIds ?? []).map(id => urlMap.get(id)?.name).filter(Boolean);
+    const pcNames    = (fl.pointcloudLayerIds ?? []).map(id => urlMap.get(id)?.name).filter(Boolean);
+    if (modelUrls.length || pcUrls.length) linkMap.set(fl.featureId, { modelUrls, pcUrls, modelNames, pcNames });
+  }
+  if (!linkMap.size) return;
+
+  // Inject into OL features
+  for (const feature of source.getFeatures()) {
+    const fid = feature.get('_featureId');
+    if (!fid) continue;
+    const entry = linkMap.get(fid);
+    if (!entry) continue;
+    if (entry.modelUrls.length) {
+      feature.set('_model3dUrls', entry.modelUrls);
+      if (entry.modelNames.length) feature.set('_model3dNames', entry.modelNames);
+    }
+    if (entry.pcUrls.length) {
+      feature.set('_pointcloudUrls', entry.pcUrls);
+      if (entry.pcNames.length) feature.set('_pointcloudNames', entry.pcNames);
+    }
+  }
 }

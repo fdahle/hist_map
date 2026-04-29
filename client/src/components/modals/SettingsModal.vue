@@ -37,10 +37,10 @@
               </div>
             </section>
 
-            <section class="settings-section">
+            <section v-if="mode === 'map' || bugReportMode === 'auto'" class="settings-section">
               <h4>Interface</h4>
 
-              <div class="setting-row">
+              <div v-if="mode === 'map'" class="setting-row">
                 <div class="setting-info">
                   <label for="info-bar-toggle">Show Information Bar</label>
                   <p class="setting-desc">
@@ -59,7 +59,7 @@
                 </div>
               </div>
 
-              <div class="setting-row">
+              <div v-if="mode === 'map'" class="setting-row">
                 <div class="setting-info">
                   <label for="map-ribbon-toggle">Show Map Ribbon</label>
                   <p class="setting-desc">
@@ -97,7 +97,7 @@
                 </div>
               </div>
 
-              <div class="setting-row">
+              <div v-if="mode === 'map'" class="setting-row">
                 <div class="setting-info">
                   <label for="arrow-buttons-toggle">Show Layer Order Arrows</label>
                   <p class="setting-desc">
@@ -115,11 +115,6 @@
                   <label for="arrow-buttons-toggle" class="slider"></label>
                 </div>
               </div>
-            </section>
-
-            <section class="settings-section">
-              <h4>Map Preferences</h4>
-              <div class="empty-state">More settings coming soon...</div>
             </section>
           </div>
 
@@ -157,6 +152,10 @@ import { ICON_INFO, ICON_CLOSE, ICON_SETTINGS } from '@/constants/icons.js';
 defineProps({
   isOpen: {
     type: Boolean,
+  },
+  mode: {
+    type: String,
+    default: 'map',
   },
 });
 
