@@ -24,6 +24,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const theme = createPersistedRef("settings_theme", resolvedDefault);
   const showArrowButtons = createPersistedRef("settings_showArrowButtons", false);
   const showMapRibbon = createPersistedRef("settings_showMapRibbon", true);
+  const viewer3dBackgroundColor = createPersistedRef("settings_viewer3dBgColor", null);
   const bugReportMode = import.meta.env.VITE_BUG_REPORT || 'auto';
   const _bugReportUserPref = createPersistedRef("settings_showBugReportButton", true);
   const showBugReportButton = computed(() => {
@@ -39,6 +40,8 @@ export const useSettingsStore = defineStore("settings", () => {
   const setTheme = (newTheme) => { theme.value = newTheme; };
   const toggleArrowButtons = () => { showArrowButtons.value = !showArrowButtons.value; };
   const toggleMapRibbon = () => { showMapRibbon.value = !showMapRibbon.value; };
+  const setViewer3dBackgroundColor = (color) => { viewer3dBackgroundColor.value = color; };
+  const resetViewer3dBackgroundColor = () => { viewer3dBackgroundColor.value = null; };
   const toggleBugReportButton = () => { if (bugReportMode === 'auto') _bugReportUserPref.value = !_bugReportUserPref.value; };
 
   return {
@@ -53,6 +56,9 @@ export const useSettingsStore = defineStore("settings", () => {
     toggleArrowButtons,
     showMapRibbon,
     toggleMapRibbon,
+    viewer3dBackgroundColor,
+    setViewer3dBackgroundColor,
+    resetViewer3dBackgroundColor,
     bugReportMode,
     showBugReportButton,
     toggleBugReportButton,

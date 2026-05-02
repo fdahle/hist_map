@@ -136,6 +136,7 @@ export function useLayerManager(map) {
       category,
       isUserAdded: layerConf.isUserAdded ?? false,
       attribution: layerConf.attribution ?? null,
+      order: layerConf.order ?? 0,
     });
 
     if (layerConfig.layerInstance) {

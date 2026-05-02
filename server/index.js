@@ -331,6 +331,18 @@ app.get('/viewer/access-status', async (req, res) => {
   }
 });
 
+// Map access status — public, tells the client whether the map viewer is accessible
+app.get('/map/access-status', async (req, res) => {
+  try {
+    const yamlText = await fs.readFile(configFilePath, 'utf8');
+    const parsed = yaml.load(yamlText, { schema: yaml.CORE_SCHEMA });
+    const mapEnabled = parsed?.ui?.map_access !== false;
+    res.json({ mapEnabled });
+  } catch {
+    res.json({ mapEnabled: true });
+  }
+});
+
 // Health check endpoint — minimal response to avoid information disclosure
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
@@ -482,6 +494,17 @@ app.get('/admin/storage', requireAdminAuth, async (req, res) => {
     return total;
   }
   const usedBytes = await dirSize(dataDir);
+
+  const typeBytes = { geojson: 0, geotiff: 0, model: 0, pointcloud: 0, csv: 0 };
+  try {
+    const layers = await listLayers(layersDir);
+    await Promise.all(layers.map(async (layer) => {
+      if (layer.fileType in typeBytes) {
+        typeBytes[layer.fileType] += await dirSize(resolveInDir(layersDir, layer.id));
+      }
+    }));
+  } catch { /* non-fatal */ }
+
   let diskFreeBytes  = null;
   let diskTotalBytes = null;
   try {
@@ -489,7 +512,7 @@ app.get('/admin/storage', requireAdminAuth, async (req, res) => {
     diskFreeBytes  = st.bavail * st.bsize;
     diskTotalBytes = st.blocks * st.bsize;
   } catch { /* statfs not available on this platform/Node version */ }
-  res.json({ usedBytes, uploadLimitMb: config.uploadLimitMb, diskFreeBytes, diskTotalBytes });
+  res.json({ usedBytes, typeBytes, uploadLimitMb: config.uploadLimitMb, diskFreeBytes, diskTotalBytes });
 });
 
 // System library availability check
@@ -619,8 +642,14 @@ app.get('/admin/layers/:id/preview', requireAdminAuth, async (req, res) => {
     }
 
     if (meta.fileType === 'geojson') {
-      const geojson = JSON.parse(raw);
-      const features = (geojson.features ?? []).slice(0, n);
+      let allFeatures;
+      if (meta.extension === '.geojsonl') {
+        const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+        allFeatures = lines.slice(1).flatMap(l => { try { return [JSON.parse(l)]; } catch { return []; } });
+      } else {
+        allFeatures = JSON.parse(raw).features ?? [];
+      }
+      const features = allFeatures.slice(0, n);
       const columnSet = new Set();
       for (const f of features) {
         for (const k of Object.keys(f.properties ?? {})) columnSet.add(k);
@@ -636,7 +665,7 @@ app.get('/admin/layers/:id/preview', requireAdminAuth, async (req, res) => {
         const v = f.properties?.[c];
         return v == null ? '' : String(v);
       }));
-      return res.json({ columns, rows, total: geojson.features?.length ?? 0 });
+      return res.json({ columns, rows, total: allFeatures.length });
     }
 
     return res.status(400).json({ error: 'Preview not available for this layer type.' });
@@ -894,6 +923,8 @@ function _startOptimizationJob(layerId, type, dataPath) {
           meta.status    = 'ready';
           meta.optimized = true;
           if (originalBackup) meta.originalBackup = originalBackup;
+          const { size: cogSize } = await fs.stat(absPath).catch(() => ({}));
+          if (cogSize) meta.fileSizeBytes = cogSize;
         } else {
           meta.status = 'ready'; // usable even without COG
         }
@@ -910,6 +941,9 @@ function _startOptimizationJob(layerId, type, dataPath) {
           meta.dataPath  = dataPath.replace(/\.(las|laz)$/i, '.copc.laz');
           meta.extension = '.copc.laz';
           if (originalBackup) meta.originalBackup = originalBackup;
+          const copcAbsPath = absPath.replace(/\.(las|laz)$/i, '.copc.laz');
+          const { size: copcSize } = await fs.stat(copcAbsPath).catch(() => ({}));
+          if (copcSize) meta.fileSizeBytes = copcSize;
         } else {
           meta.status = 'ready'; // usable even without COPC
         }
@@ -922,7 +956,7 @@ function _startOptimizationJob(layerId, type, dataPath) {
       const meta = await readLayerMeta(layersDir, layerId).catch(() => null);
       if (meta) {
         meta.status = 'error';
-        meta.processingLog.push(`Optimisation error: ${err.message}`);
+        meta.processingLog.push(`${type.toUpperCase()}: error`);
         await writeLayerMeta(layersDir, layerId, meta).catch(() => {});
       }
       logger.error(`Optimisation job ${job.id} failed:`, err.message);
@@ -1194,11 +1228,12 @@ basemaps: []
 data_layers: []
 
 ui:
+  map_access: true
   map_download: true
   map_upload: true
+  viewer_access: true
   viewer_download: true
   viewer_upload: true
-  viewer_access: true
 `;
 
 try {

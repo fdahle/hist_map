@@ -22,24 +22,18 @@
             </div>
           </div>
 
-          <div class="field-row">
-            <div class="field-group">
-              <label>Order <span class="required">*</span><FieldHint text="Controls rendering priority. Higher values appear on top. Each layer should have a unique order number." /></label>
-              <input v-model.number="draft.order" type="number" min="0" />
-            </div>
-            <div class="field-group field-toggle-row">
-              <label>Visible by default<FieldHint text="Whether this layer is shown when the map first loads. For base layers, exactly one should be visible." /></label>
-              <div class="toggle-switch">
-                <input :id="`vis-${uid}`" v-model="draft.visible" type="checkbox" />
-                <label :for="`vis-${uid}`" class="slider"></label>
-              </div>
-            </div>
-          </div>
-
           <!-- URL (all types) -->
           <div class="field-group">
             <label>URL <span class="required">*</span><FieldHint text="Full URL to the data source: tile server template ({x}/{y}/{z}), WMS/WMTS endpoint, or path to a GeoJSON/GeoTIFF file." /></label>
-            <input v-model="draft.url" type="text" placeholder="https://..." />
+            <div class="url-input-row">
+              <input v-model="draft.url" type="text" placeholder="https://..." @input="urlTestState = 'idle'" />
+              <button v-if="isBaseType" class="btn-test-url" :disabled="!draft.url || urlTestState === 'testing'" @click="testUrl" title="Fetch a test tile to check if the URL is reachable">
+                {{ urlTestState === 'testing' ? '…' : 'Test' }}
+              </button>
+            </div>
+            <span v-if="urlTestState === 'ok'"    class="url-test-result url-test-ok">✓ URL reachable</span>
+            <span v-if="urlTestState === 'error'"  class="url-test-result url-test-err">⚠ Could not reach URL — check address and server CORS settings</span>
+            <p v-if="isBaseType" class="field-crs-hint">Tile layers use EPSG:3857 automatically. For WMTS the Matrix Set defines the CRS. For WMS use the "CRS supported" toggle below.</p>
           </div>
 
           <!-- Select from uploaded files (overlay only) -->
@@ -333,6 +327,31 @@ const allowedTypes = computed(() =>
 );
 
 const isNew = computed(() => !props.layer);
+
+// ── Draft state ────────────────────────────────────────────────
+function blankDraft() {
+  return {
+    name: '', type: allowedTypes.value[0],
+    url: '', attribution: '',
+    // wmts
+    layer: '', matrixSet: '', format: '', style: '',
+    // wms
+    layers: '', version: '', transparent: false, crs_support: true,
+    // tile
+    tileSize: null,
+    // geojson
+    stroke_color: '#3b82f6', fill_color: 'auto',
+    render_mode: '', pointType: '', group_by: '', search_fields: [], color_by: null,
+    // geotiff
+    opacity: null, noDataValue: null, normalize: false, overviews: false,
+    // shared crs_options
+    crs_options: null,
+  };
+}
+
+const draft = ref(blankDraft());
+const validationError = ref('');
+
 const isBaseType = computed(() => BASE_TYPES.includes(draft.value.type));
 
 // ── Server file picker (overlay only) ─────────────────────────
@@ -372,34 +391,58 @@ function selectServerFile(f) {
   draft.value.url = getApiUrl(f.dataPath);
 }
 
+// ── URL reachability test ──────────────────────────────────────
+const urlTestState = ref('idle'); // idle | testing | ok | error
+
+function buildTestUrl(url, type) {
+  if (!url?.trim()) return null;
+  if (type === 'tile') {
+    // Substitute a known-valid coordinate (z=1, x=0, y=0)
+    return url
+      .replace(/\{[a-zA-Z]-[a-zA-Z]\}/g, (m) => m[1]) // {a-c} → a
+      .replace(/\{z\}/gi, '1').replace(/\{x\}/gi, '0').replace(/\{y\}/gi, '0');
+  }
+  if (type === 'wms') {
+    const sep = url.includes('?') ? '&' : '?';
+    return url + sep + 'SERVICE=WMS&REQUEST=GetCapabilities';
+  }
+  return url; // wmts: test the endpoint directly
+}
+
+async function testUrl() {
+  const rawUrl = draft.value.url?.trim();
+  if (!rawUrl) return;
+  urlTestState.value = 'testing';
+  const testTarget = buildTestUrl(rawUrl, draft.value.type);
+  try {
+    if (draft.value.type === 'tile') {
+      // Image element bypasses CORS and works for any PNG/JPEG tile
+      await new Promise((resolve, reject) => {
+        const img = new Image();
+        const timer = setTimeout(() => reject(new Error('timeout')), 8000);
+        img.onload  = () => { clearTimeout(timer); resolve(); };
+        img.onerror = () => { clearTimeout(timer); reject(new Error('load error')); };
+        img.src = testTarget;
+      });
+    } else {
+      // WMS/WMTS: no-cors fetch; throws only on network error
+      const ctrl = new AbortController();
+      setTimeout(() => ctrl.abort(), 8000);
+      await fetch(testTarget, { mode: 'no-cors', signal: ctrl.signal });
+    }
+    urlTestState.value = 'ok';
+  } catch {
+    urlTestState.value = 'error';
+  }
+}
+
+// Reset test status when URL or type changes
+watch([() => draft.value.url, () => draft.value.type], () => { urlTestState.value = 'idle'; });
+
 // Load server files when modal opens for overlay layers
 watch(() => props.isOpen, (open) => {
   if (open && props.layerGroup === 'overlay') loadServerFiles();
 });
-
-// ── Draft state ────────────────────────────────────────────────
-function blankDraft() {
-  return {
-    name: '', type: allowedTypes.value[0], visible: false, order: 0,
-    url: '', attribution: '',
-    // wmts
-    layer: '', matrixSet: '', format: '', style: '',
-    // wms
-    layers: '', version: '', transparent: false, crs_support: true,
-    // tile
-    tileSize: null,
-    // geojson
-    stroke_color: '#3b82f6', fill_color: 'auto',
-    render_mode: '', pointType: '', group_by: '', search_fields: [], color_by: null,
-    // geotiff
-    opacity: null, noDataValue: null, normalize: false, overviews: false,
-    // shared crs_options
-    crs_options: null,
-  };
-}
-
-const draft = ref(blankDraft());
-const validationError = ref('');
 
 const liveWarnings = computed(() => {
   const warnings = [];
@@ -506,8 +549,6 @@ function save() {
   // Always-present fields
   out.name    = d.name.trim();
   out.type    = d.type;
-  out.visible = d.visible;
-  out.order   = d.order;
   out.url     = d.url.trim();
 
   if (BASE_TYPES.includes(d.type)) {
@@ -691,6 +732,20 @@ function save() {
 .required { color: #ef4444; margin-left: 2px; }
 .hint { font-size: 0.75rem; color: var(--admin-muted, #777); margin-left: 4px; font-weight: 400; }
 
+.url-input-row { display: flex; gap: 0.4rem; }
+.url-input-row input { flex: 1; }
+.btn-test-url {
+  padding: 0 0.65rem; border-radius: 6px; border: 1px solid var(--admin-border, #ccc);
+  background: var(--admin-bg, #f3f4f6); color: var(--admin-text, #333);
+  font-size: 0.8rem; cursor: pointer; white-space: nowrap; flex-shrink: 0;
+}
+.btn-test-url:hover:not(:disabled) { background: #e5e7eb; }
+.btn-test-url:disabled { opacity: 0.5; cursor: default; }
+.url-test-result { font-size: 0.75rem; margin-top: 0.2rem; display: block; }
+.url-test-ok  { color: #16a34a; }
+.url-test-err { color: #b45309; }
+.field-crs-hint { font-size: 0.72rem; color: var(--admin-muted, #888); margin: 0.25rem 0 0; }
+
 /* collapsible */
 .collapsible {
   border: 1px solid var(--admin-border, #e0e0e0);
@@ -807,7 +862,6 @@ details.collapsible:not([open]) > summary {
 .picker-item {
   padding: 0.3rem 0.55rem;
   font-size: 0.8rem;
-  font-family: "Consolas", monospace;
   border: 1px solid var(--admin-border, #e0e0e0);
   border-radius: 4px;
   cursor: pointer;

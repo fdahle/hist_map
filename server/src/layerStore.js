@@ -27,17 +27,36 @@ export function createLayerMeta({ id, originalName, fileType, options = {} }) {
     id,
     originalName,
     extension: path.extname(originalName).toLowerCase(),
-    fileType,                                          // geojson | geotiff | model | pointcloud
+    fileType,                                          // geojson | geotiff | model | pointcloud | csv
     uploadedAt: new Date().toISOString(),
     status: 'ready',                                   // ready | optimizing | error
     optimized: false,
     optimizationType: null,                            // cog | copc | simplify | decimate
     keepOriginal:   options.keepOriginal   ?? false,
     originalBackup: null,                              // backup filename when keepOriginal=true
+    // ── Spatial ──────────────────────────────────────────────��───────────────
     sourceCrs:    null,                                // CRS of the original source file
     targetCrs:    null,                                // CRS stored on disk after reprojection
-    featureCount: null,                                // number of features (geojson/csv only)
-    featureIndex: null,                                // [{ id, index }] per-feature uuid map (geojson/csv only)
+    bbox:         null,                                // [minX, minY, maxX, maxY] in targetCrs/native CRS
+    // ── Storage ───────────────────────────────────────────────────────────────
+    fileSizeBytes:     null,                           // size of the stored data file in bytes (updated after conversion)
+    originalSizeBytes: null,                           // upload size in bytes (set when a background conversion changes the stored size)
+    // ── GeoJSON ───────────────────────────────────────────────────────────────
+    featureCount:   null,                              // total number of features
+    geometryType:   null,                              // dominant geometry type: Point | LineString | Polygon
+    propertySchema: null,                              // { fieldName: 'string'|'number'|'boolean' }
+    // ── GeoTIFF ───────────────────────────────────────────────────────────────
+    rasterSize:   null,                                // [width, height] in pixels
+    resolution:   null,                                // [xPixelSize, yPixelSize] in native CRS units
+    bandStats:    null,                                // [{ min, max }] per band (null if not pre-computed)    // ── Model ──────────────────────────────────────────────────────────────────────
+    vertexCount:  null,                                // OBJ vertex count / PLY element vertex
+    faceCount:    null,                                // OBJ/PLY face count; STL triangle count    // ── Point cloud ───────────────────────────────────────────────────────────
+    pointCount:   null,                                // total number of points
+    // ── CSV ───────────────────────────────────────────────────────────────────
+    rowCount:     null,                                // number of data rows (excluding header)
+    csvDelimiter: null,                                // detected delimiter character
+    csvColumns:   null,                                // column header names
+    // ── Relations ─────────────────────────────────────────────────────────────
     subFiles: [],
     layerConfig: {
       displayName: options.displayName ?? path.parse(originalName).name,
@@ -111,6 +130,23 @@ export async function readLayerMeta(layersDir, id) {
 export async function writeLayerMeta(layersDir, id, meta) {
   const metaPath = resolveInDir(layersDir, id, `${id}.meta.json`);
   await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf8');
+}
+
+// Feature index lives in a separate sidecar so the main meta.json stays small
+// even for layers with tens of thousands of features.
+// Format: [{ id: string, index: number }, ...]
+export async function writeFeatureIndex(layersDir, id, index) {
+  const indexPath = resolveInDir(layersDir, id, `${id}.index.json`);
+  await fs.writeFile(indexPath, JSON.stringify(index), 'utf8');
+}
+
+export async function readFeatureIndex(layersDir, id) {
+  const indexPath = resolveInDir(layersDir, id, `${id}.index.json`);
+  try {
+    return JSON.parse(await fs.readFile(indexPath, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 export async function listLayers(layersDir) {
@@ -209,7 +245,8 @@ export function metaToConfigLayer(meta, serverBaseUrl) {
     url,
     visible: meta.layerConfig.visible ?? true,
     order:   meta.layerConfig.order   ?? 0,
-    _layerId: meta.id,                         // back-reference kept in YAML for admin re-load
+    _layerId:     meta.id,
+    featureCount: meta.featureCount ?? null,
   };
   // Carry over any additional type-specific config fields that were set on this layer
   const extras = { ...meta.layerConfig };

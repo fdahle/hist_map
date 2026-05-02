@@ -52,7 +52,7 @@ export async function convertToCog(inputPath, options = {}) {
   if (!(await isGdalAvailable())) {
     return {
       success: false,
-      step: 'GDAL not available on this server — GeoTIFF stored as-is (COG conversion skipped)',
+      step: 'COG: skipped (GDAL unavailable)',
       originalBackup: null,
     };
   }
@@ -92,7 +92,7 @@ export async function convertToCog(inputPath, options = {}) {
     await fs.rename(tmpPath, inputPath);
     return {
       success: true,
-      step: 'Converted to Cloud Optimised GeoTIFF (COG)',
+      step: 'COG: converted',
       originalBackup,
     };
   } catch (err) {
@@ -100,7 +100,7 @@ export async function convertToCog(inputPath, options = {}) {
     await fs.unlink(tmpPath).catch(() => {});
     return {
       success: false,
-      step: `COG conversion failed: ${err.message} — original file kept`,
+      step: `COG: conversion failed`,
       originalBackup: null,
     };
   }
@@ -137,10 +137,31 @@ export async function extractGeoTiffInfo(filePath) {
         }
       }
 
-      const size = info.size ?? null;
+      const size  = info.size ?? null;          // [width, height]
       const bands = info.bands?.length ?? null;
 
-      return { crs, size, bands };
+      // Pixel resolution and native bbox from the affine geo-transform.
+      // geoTransform = [originX, pixelW, rotX, originY, rotY, pixelH]
+      let resolution = null;
+      let bbox       = null;
+      const gt = info.geoTransform;
+      if (gt && size) {
+        const [originX, pixelW, , originY, , pixelH] = gt;
+        resolution = [Math.abs(pixelW), Math.abs(pixelH)];
+        const x0 = originX, x1 = originX + size[0] * pixelW;
+        const y0 = originY, y1 = originY + size[1] * pixelH;
+        bbox = [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)];
+      }
+
+      // Per-band statistics — only populated when already stored in the file's aux metadata.
+      // We never force a full scan here (that would be expensive and write side-car files).
+      const bandStats = (info.bands ?? []).map(b => {
+        const min = b.minimum ?? b.computedMin ?? null;
+        const max = b.maximum ?? b.computedMax ?? null;
+        return (min !== null && max !== null) ? { min, max } : null;
+      }).filter(Boolean);
+
+      return { crs, size, bands, resolution, bbox, bandStats: bandStats.length ? bandStats : null };
     } catch {
       // Fall through to geotiff.js fallback.
     }
@@ -149,7 +170,7 @@ export async function extractGeoTiffInfo(filePath) {
   // Fallback: use geotiff.js to read GeoKeys from the file header.
   try {
     const buffer = await fs.readFile(filePath);
-    const tiff = await fromArrayBuffer(buffer.buffer);
+    const tiff  = await fromArrayBuffer(buffer.buffer);
     const image = await tiff.getImage();
 
     let crs = null;
@@ -160,10 +181,20 @@ export async function extractGeoTiffInfo(filePath) {
       crs = `EPSG:${geoKeys.GeographicTypeGeoKey}`;
     }
 
-    const size = [image.getWidth(), image.getHeight()];
+    const size  = [image.getWidth(), image.getHeight()];
     const bands = image.getSamplesPerPixel();
 
-    return { crs, size, bands };
+    // getBoundingBox() returns [west, south, east, north] in the native CRS.
+    let bbox       = null;
+    let resolution = null;
+    try {
+      const bb = image.getBoundingBox();
+      if (bb) bbox = [bb[0], bb[1], bb[2], bb[3]];
+      const res = image.getResolution();
+      if (res) resolution = [Math.abs(res[0]), Math.abs(res[1])];
+    } catch { /* non-fatal */ }
+
+    return { crs, size, bands, resolution, bbox, bandStats: null };
   } catch {
     return null;
   }

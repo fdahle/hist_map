@@ -55,7 +55,7 @@ export function reprojectGeojson(geojson, targetCrs, overrideSourceCrs = null) {
   const sourceCrs = normaliseEpsg(overrideSourceCrs) ?? detectCrsFromGeojson(geojson);
   const normTarget = normaliseEpsg(targetCrs) ?? targetCrs;
   if (sourceCrs === normTarget) {
-    return { geojson, step: `CRS already ${normTarget} — no reprojection needed`, sourceCrs, targetCrs: normTarget };
+    return { geojson, step: `Already in target projection ${normTarget}, no reprojection needed.`, sourceCrs, targetCrs: normTarget };
   }
 
   const fromDef = epsg[sourceCrs.split(':')[1]]?.proj4;
@@ -64,7 +64,7 @@ export function reprojectGeojson(geojson, targetCrs, overrideSourceCrs = null) {
   if (!fromDef || !toDef) {
     return {
       geojson,
-      step: `Reprojection skipped — unknown CRS definition for ${sourceCrs} or ${normTarget}`,
+      step: `Reprojection skipped: ${sourceCrs} or ${normTarget} not recognized.`,
       sourceCrs,
       targetCrs: sourceCrs,
     };
@@ -72,9 +72,9 @@ export function reprojectGeojson(geojson, targetCrs, overrideSourceCrs = null) {
 
   try {
     const reprojected = reproject(geojson, fromDef, toDef);
-    return { geojson: reprojected, step: `Reprojected ${sourceCrs} → ${normTarget}`, sourceCrs, targetCrs: normTarget };
+    return { geojson: reprojected, step: `Reprojected from ${sourceCrs} to ${normTarget}.`, sourceCrs, targetCrs: normTarget };
   } catch (err) {
-    return { geojson, step: `Reprojection failed: ${err.message} — data kept in ${sourceCrs}`, sourceCrs, targetCrs: sourceCrs };
+    return { geojson, step: `Reprojection failed, coordinates kept in original projection ${sourceCrs}.`, sourceCrs, targetCrs: sourceCrs };
   }
 }
 
@@ -177,6 +177,48 @@ export function linkAssetsToFeatures(geojson, modelMap, pointcloudMap) {
   return { geojson, linkedCount, linkedAssets: { models: modelCounts, pointclouds: pointcloudCounts } };
 }
 
+// ── GeoJSON stats ─────────────────────────────────────────────────────────────
+
+/**
+ * Compute bbox and property schema from a feature array.
+ * Called after processing so coordinates are already in the target CRS.
+ *
+ * @param {object[]} features  GeoJSON Feature array
+ * @returns {{ bbox: number[]|null, propertySchema: Record<string,string> }}
+ */
+export function computeGeojsonStats(features) {
+  // bbox
+  let bbox = null;
+  if (features.length > 0) {
+    try {
+      const fc = { type: 'FeatureCollection', features };
+      const [minX, minY, maxX, maxY] = turf.bbox(fc);
+      if (isFinite(minX) && isFinite(minY) && isFinite(maxX) && isFinite(maxY)) {
+        bbox = [minX, minY, maxX, maxY];
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  // propertySchema — scan every feature to get a stable type per field
+  const typeSets = {};
+  for (const f of features) {
+    for (const [k, v] of Object.entries(f.properties ?? {})) {
+      if (k.startsWith('_')) continue;
+      if (!(k in typeSets)) typeSets[k] = new Set();
+      if (v !== null && v !== undefined && v !== '') typeSets[k].add(typeof v);
+    }
+  }
+  const propertySchema = {};
+  for (const [k, types] of Object.entries(typeSets)) {
+    if (types.size === 0 || (types.size === 1 && types.has('string'))) propertySchema[k] = 'string';
+    else if ([...types].every(t => t === 'number'))                    propertySchema[k] = 'number';
+    else if ([...types].every(t => t === 'boolean'))                   propertySchema[k] = 'boolean';
+    else                                                               propertySchema[k] = 'string';
+  }
+
+  return { bbox, propertySchema };
+}
+
 // ── Full pipeline ──────────────────────────────────────────────────────────────
 
 /**
@@ -195,19 +237,19 @@ export function processGeoJsonObject(geojson, { targetCrs, simplifyTolerance, co
   steps.push(reprojectStep);
 
   geojson = simplifyGeojson(geojson, simplifyTolerance ?? 50);
-  if (simplifyTolerance > 0) steps.push(`Simplified (tolerance ${simplifyTolerance} m)`);
+  if (simplifyTolerance > 0) steps.push(`Geometry simplified with a tolerance of ${simplifyTolerance} m.`);
 
   const prec = coordinatePrecision ?? 0;
   geojson = truncateGeojson(geojson, prec);
   steps.push(prec === 0
-    ? 'Coordinates rounded to whole units (precision 0)'
-    : `Coordinates truncated to ${prec} decimal place${prec === 1 ? '' : 's'}`);
+    ? 'Coordinates rounded to whole units.'
+    : `Coordinates rounded to ${prec} decimal place${prec === 1 ? '' : 's'}.`);
 
   if (modelMap?.size || pointcloudMap?.size) {
     const { geojson: linked, linkedCount } = linkAssetsToFeatures(geojson, modelMap ?? new Map(), pointcloudMap ?? new Map());
     geojson = linked;
-    if (linkedCount > 0) steps.push(`Linked assets to ${linkedCount} feature(s)`);
-    else steps.push('No automatic asset–feature matches found (you can link manually via URL fields)');
+    if (linkedCount > 0) steps.push(`Linked ${linkedCount} 3D asset${linkedCount === 1 ? '' : 's'} to features by filename.`);
+    else steps.push('No 3D assets could be matched to features.');
   }
 
   // Stamp the output CRS so the client (layerWorker) can set dataProjection correctly.

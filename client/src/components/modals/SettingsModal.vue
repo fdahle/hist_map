@@ -37,6 +37,36 @@
               </div>
             </section>
 
+            <section v-if="mode === '3d'" class="settings-section">
+              <h4>3D Scene</h4>
+
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label for="bg-color-picker">Background Color</label>
+                  <p class="setting-desc">
+                    Override the default scene background color.
+                  </p>
+                </div>
+
+                <div class="color-control">
+                  <input
+                    id="bg-color-picker"
+                    type="color"
+                    :value="viewer3dBgPickerValue"
+                    @input="setViewer3dBackgroundColor($event.target.value)"
+                  />
+                  <button
+                    v-if="viewer3dBackgroundColor"
+                    class="reset-color-btn"
+                    @click="resetViewer3dBackgroundColor"
+                    title="Reset to theme default"
+                  >
+                    Reset
+                  </button>
+                </div>
+              </div>
+            </section>
+
             <section v-if="mode === 'map' || bugReportMode === 'auto'" class="settings-section">
               <h4>Interface</h4>
 
@@ -142,7 +172,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from "pinia";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -175,9 +205,13 @@ const goToAdmin = () => {
 };
 
 // Extract State (Must use storeToRefs to keep it reactive!)
-const { showInfoBar, showArrowButtons, showMapRibbon, showBugReportButton, theme, adminEnabled } = storeToRefs(settingsStore);
-const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleBugReportButton, toggleTheme } = settingsStore;
+const { showInfoBar, showArrowButtons, showMapRibbon, showBugReportButton, theme, adminEnabled, viewer3dBackgroundColor } = storeToRefs(settingsStore);
+const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleBugReportButton, toggleTheme, setViewer3dBackgroundColor, resetViewer3dBackgroundColor } = settingsStore;
 const bugReportMode = import.meta.env.VITE_BUG_REPORT || 'auto';
+
+const viewer3dBgPickerValue = computed(() =>
+  viewer3dBackgroundColor.value ?? (theme.value === 'dark' ? '#1a1a1a' : '#87ceeb')
+);
 </script>
 
 <style scoped>
@@ -598,5 +632,63 @@ input:checked + .slider:before {
 .btn-secondary :deep(svg) {
   width: 16px;
   height: 16px;
+}
+
+/* --- Color Picker Control --- */
+.color-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.color-control input[type="color"] {
+  width: 44px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.theme-light .color-control input[type="color"] {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+.color-control input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color-control input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+
+.reset-color-btn {
+  background: rgba(255, 255, 255, 0.07);
+  color: #aaa;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.theme-light .reset-color-btn {
+  background: rgba(0, 0, 0, 0.04);
+  color: #666;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+.reset-color-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.theme-light .reset-color-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+  color: #000;
 }
 </style>

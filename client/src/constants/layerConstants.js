@@ -22,7 +22,7 @@ export const LAYER_STATUS = {
 
 // Layer categories
 export const LAYER_CATEGORY = {
-  BACKGROUND: 'background', // pinned OSM/system tile — never shown in layer switcher
+  BACKGROUND: 'background', // reserved; currently unused
   BASE: 'base',
   OVERLAY: 'overlay',
 };

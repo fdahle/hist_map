@@ -57,8 +57,21 @@ export const useLayerStore = defineStore("layers", () => {
     thumbnailUrl = null,
     downloadUrl = null,
     colorBy = null,
+    order = 0,
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
+
+    // Enforce radio behaviour for base layers at load time: only the first active base
+    // layer stays active; subsequent ones start hidden so the switcher is coherent.
+    if (category === LAYER_CATEGORY.BASE && visible) {
+      const hasActiveBase = layers.value.some(
+        (l) => l.category === LAYER_CATEGORY.BASE && l.active,
+      );
+      if (hasActiveBase) {
+        visible = false;
+        if (layerInstance) layerInstance.setVisible(false);
+      }
+    }
 
     let initialStatus = LAYER_STATUS.READY;
     if (type === "geojson" && !layerInstance) {
@@ -82,6 +95,7 @@ export const useLayerStore = defineStore("layers", () => {
       name,
       type,
       category,
+      order,
       active: visible,
       layerInstance: layerInstance ? markRaw(layerInstance) : null,
       geometryType,
@@ -396,9 +410,6 @@ export const useLayerStore = defineStore("layers", () => {
     // Find indices in the full layers array
     const currentFullIndex = layers.value.findIndex(l => l._layerId === layerId);
     
-    // Count all non-overlay layers (background + base) that precede overlays in the array.
-    // Using only BASE would miss BACKGROUND layers (e.g. OSM tile background), causing
-    // the insertion index to be off by the number of background layers.
     const nonOverlayCount = layers.value.filter(l => l.category !== LAYER_CATEGORY.OVERLAY).length;
     
     // Calculate the target insertion index in the full layers array

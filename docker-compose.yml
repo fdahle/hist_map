@@ -19,8 +19,8 @@ services:
         required: false
     environment:
       - NODE_ENV=production
-      - CORS_ORIGINS=http://localhost:8080
-      # Set ADMIN_ENABLED=false in your root .env to strip the admin panel entirely.
+      # Overrides the value from root .env — change here or set CORS_ORIGINS in .env.
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:8080}
       - ADMIN_ENABLED=${ADMIN_ENABLED:-true}
     command: node index.js
     networks:
@@ -32,11 +32,12 @@ services:
       context: ./client
       dockerfile: Dockerfile
       args:
-        VITE_DEFAULT_THEME: ${VITE_DEFAULT_THEME:-auto}
         VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
         VITE_SITE_TITLE: ${VITE_SITE_TITLE:-Stratum3D}
-        VITE_SITE_FAVICON: ${VITE_SITE_FAVICON:-/vite.svg}
+        VITE_SITE_FAVICON: ${VITE_SITE_FAVICON:-/favicon.svg}
         VITE_BUG_REPORT: ${VITE_BUG_REPORT:-auto}
+        VITE_DEBUG_MODE: ${VITE_DEBUG_MODE:-false}
+        VITE_DEFAULT_THEME: ${VITE_DEFAULT_THEME:-auto}
     container_name: stratum3D_client
     ports:
       # Bind to localhost only — access goes through Apache/nginx reverse proxy in production.

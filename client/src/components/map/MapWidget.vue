@@ -285,15 +285,19 @@ onMounted(async () => {
   layerManagerRef.value = layerManager;
 
   const promises = [];
-  // Inject pinned OSM background layer (URL auto-selected by CRS) when enabled.
+  // OSM is treated as a regular base layer so it participates in the switcher's
+  // radio group. osm_background_order controls its position among the basemaps.
+  const osmPos = Math.min(config.osm_background_order ?? 0, (config.basemaps ?? []).length);
   if (config.osm_background) {
     const crsKey = (config.crs || 'EPSG:3857').trim().toUpperCase();
-    const bgConf = OSM_BG_CONFIGS[crsKey] ?? OSM_BG_CONFIGS.default;
-    promises.push(layerManager.processLayer(bgConf, 'background'));
+    const bgConf = { ...(OSM_BG_CONFIGS[crsKey] ?? OSM_BG_CONFIGS.default), order: osmPos };
+    promises.push(layerManager.processLayer(bgConf, 'base'));
   }
   if (config.basemaps) {
     promises.push(
-      ...config.basemaps.map((l) => layerManager.processLayer(l, "base"))
+      ...config.basemaps.map((l, i) =>
+        layerManager.processLayer({ ...l, order: i < osmPos ? i : i + 1 }, "base")
+      )
     );
   }
   if (config.data_layers) {

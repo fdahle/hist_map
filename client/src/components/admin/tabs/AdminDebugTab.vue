@@ -89,6 +89,31 @@
           <span class="info-val ua">{{ userAgent }}</span>
         </div>
       </div>
+
+      <div v-if="storageInfo" class="storage-viz">
+        <div class="storage-header">
+          <span class="storage-title">Storage</span>
+          <span v-if="storageInfo.diskFreeBytes != null" class="storage-summary">
+            {{ formatBytes(storageInfo.diskFreeBytes) }} free
+            <template v-if="storageInfo.diskTotalBytes"> of {{ formatBytes(storageInfo.diskTotalBytes) }}</template>
+          </span>
+        </div>
+        <div class="disk-bar">
+          <div
+            v-for="seg in diskSegments" :key="seg.key"
+            class="disk-seg" :class="{ 'seg-free': seg.key === 'free' }"
+            :style="{ width: seg.pct + '%', background: seg.color }"
+            :title="seg.label + ': ' + formatBytes(seg.bytes)"
+          ></div>
+        </div>
+        <div class="disk-legend">
+          <span v-for="seg in diskSegments.filter(s => s.key !== 'free' && s.bytes > 0)" :key="seg.key" class="legend-item">
+            <span class="legend-dot" :style="{ background: seg.color }"></span>
+            <span class="legend-label">{{ seg.label }}</span>
+            <span class="legend-size">{{ formatBytes(seg.bytes) }}</span>
+          </span>
+        </div>
+      </div>
     </div>
 
     <!-- ── Danger Zone ────────────────────────────────────────────────────── -->
@@ -224,6 +249,45 @@ async function fetchConfig() {
 const apiBase   = getApiUrl('');
 const userAgent = navigator.userAgent;
 
+const storageInfo = ref(null);
+
+async function fetchStorage() {
+  try {
+    const res = await fetch(getApiUrl('/admin/storage'), { headers: authHeaders() });
+    if (res.ok) storageInfo.value = await res.json();
+  } catch { /* non-fatal */ }
+}
+
+function formatBytes(bytes) {
+  if (bytes == null) return '—';
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return (bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+}
+
+const TYPE_LABELS = { geojson: 'GeoJSON', geotiff: 'GeoTIFF', model: '3D Models', pointcloud: 'Point Clouds', csv: 'CSV' };
+const TYPE_COLORS = { geojson: '#22c55e', geotiff: '#3b82f6', model: '#f59e0b', pointcloud: '#8b5cf6', csv: '#06b6d4' };
+
+const diskSegments = computed(() => {
+  if (!storageInfo.value) return [];
+  const info = storageInfo.value;
+  const total = info.diskTotalBytes || info.usedBytes || 1;
+  const tb = info.typeBytes ?? {};
+
+  const typeSum = Object.values(tb).reduce((a, b) => a + b, 0);
+  const otherUsed = Math.max(0, info.usedBytes - typeSum);
+
+  const segs = [];
+  for (const [key, label] of Object.entries(TYPE_LABELS)) {
+    const bytes = tb[key] ?? 0;
+    if (bytes > 0) segs.push({ key, label, bytes, color: TYPE_COLORS[key], pct: (bytes / total) * 100 });
+  }
+  if (otherUsed > 0) segs.push({ key: 'other', label: 'Other', bytes: otherUsed, color: '#94a3b8', pct: (otherUsed / total) * 100 });
+  if (info.diskFreeBytes != null) segs.push({ key: 'free', bytes: info.diskFreeBytes, pct: (info.diskFreeBytes / total) * 100 });
+  return segs;
+});
+
 // ── Danger zone ────────────────────────────────────────────────────────────────
 const resetConfirming       = ref(false);
 const isResetting           = ref(false);
@@ -279,6 +343,7 @@ onMounted(() => {
   fetchLibraries();
   fetchLayers();
   fetchConfig();
+  fetchStorage();
 });
 </script>
 
@@ -329,7 +394,7 @@ onMounted(() => {
 .yaml-preview {
   margin: 0; padding: 0.75rem; font-size: 0.75rem; line-height: 1.5;
   background: var(--admin-bg, #f3f4f6); border-radius: 5px; overflow-x: auto;
-  max-height: 400px; overflow-y: auto; white-space: pre; font-family: 'Courier New', Courier, monospace;
+  max-height: 400px; overflow-y: auto; white-space: pre;
   color: var(--admin-text, #1a1a1a);
 }
 
@@ -339,6 +404,30 @@ onMounted(() => {
 .info-key { font-weight: 500; color: var(--admin-muted, #777); flex-shrink: 0; min-width: 80px; }
 .info-val { color: var(--admin-text, #333); word-break: break-all; }
 .ua       { font-size: 0.72rem; color: var(--admin-muted, #aaa); }
+/* Storage visualisation */
+.storage-viz {
+  margin-top: 0.85rem; padding-top: 0.75rem;
+  border-top: 1px solid var(--admin-border, #e0e0e0);
+}
+.storage-header {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 0.55rem; gap: 0.5rem; flex-wrap: wrap;
+}
+.storage-title { font-size: 0.82rem; font-weight: 600; color: var(--admin-text, #1a1a1a); }
+.storage-summary { font-size: 0.75rem; color: var(--admin-muted, #777); display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem; }
+.disk-bar {
+  height: 14px; border-radius: 7px; overflow: hidden; display: flex;
+  background: var(--admin-bg, #f0f0f0); border: 1px solid var(--admin-border, #e0e0e0);
+}
+.disk-seg { height: 100%; transition: width 0.4s ease; min-width: 0; }
+.disk-seg.seg-free { background: var(--admin-bg, #f0f0f0) !important; }
+.disk-legend {
+  display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; margin-top: 0.6rem;
+}
+.legend-item { display: flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; }
+.legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.legend-label { color: var(--admin-muted, #777); }
+.legend-size { color: var(--admin-text, #333); font-weight: 500; }
 
 .spin { animation: spin 0.8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

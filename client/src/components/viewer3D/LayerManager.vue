@@ -86,6 +86,7 @@ const getLayerIcon = (type) => {
   switch(type) {
     case 'model':      return ICON_3D_MODEL;
     case 'pointcloud': return ICON_POINT_CLOUD;
+    case 'copc':       return ICON_POINT_CLOUD;
     case 'camera':     return ICON_CAMERA;
     case 'markers':    return ICON_MARKER_FLAG;
     default:           return ICON_PACKAGE;
@@ -131,9 +132,10 @@ const selectLayer = (layerId) => {
   emit('select-layer', layer);
 };
 
-// --- Point size helpers (only relevant for pointcloud layers) ---
+// --- Point size helpers (only relevant for pointcloud/copc layers) ---
 const getPointSize = (layer) => {
   if (!layer.object) return 2;
+  if (layer.object.userData?.type === 'copc') return layer.object.userData.pointSize ?? 2;
   let size = 2;
   layer.object.traverse((child) => {
     if (child.isPoints && child.material) size = child.material.size;
@@ -143,6 +145,11 @@ const getPointSize = (layer) => {
 
 const setPointSize = (layer, newSize) => {
   if (!layer.object) return;
+  if (layer.object.userData?.type === 'copc') {
+    // COPC point size is managed via setCOPCPointSize in Canvas.vue through 3DView.vue
+    layer.object.userData.pointSize = newSize;
+    return;
+  }
   layer.object.traverse((child) => {
     if (child.isPoints && child.material) {
       child.material.size = newSize;
@@ -155,6 +162,7 @@ const setPointSize = (layer, newSize) => {
 const TYPE_LABELS = {
   model:      '3D Model',
   pointcloud: 'Point Cloud',
+  copc:       'Point Cloud (COPC)',
   camera:     'Camera Poses',
   markers:    'GCP Markers',
 };
@@ -163,6 +171,31 @@ const collectLayerInfo = (layer) => {
   const rows = [];
   rows.push({ key: 'Name', value: layer.name });
   rows.push({ key: 'Type', value: TYPE_LABELS[layer.type] || layer.type });
+
+  // COPC entity — read metadata from Giro3D entity
+  if (layer.object?.userData?.type === 'copc') {
+    const entity = layer.object.userData.giro3dEntity;
+    if (entity) {
+      const metadata = entity.source?.metadata;
+      if (metadata?.pointCount) {
+        rows.push({ key: 'Points', value: metadata.pointCount.toLocaleString() });
+      }
+      if (entity.object3d) {
+        const box = new THREE.Box3().setFromObject(entity.object3d);
+        if (!box.isEmpty()) {
+          const size = box.getSize(new THREE.Vector3());
+          const center = box.getCenter(new THREE.Vector3());
+          rows.push({ key: 'Size X', value: `${size.x.toFixed(2)} m` });
+          rows.push({ key: 'Size Y', value: `${size.y.toFixed(2)} m` });
+          rows.push({ key: 'Size Z', value: `${size.z.toFixed(2)} m` });
+          rows.push({ key: 'Center X', value: center.x.toFixed(1) });
+          rows.push({ key: 'Center Y', value: center.y.toFixed(1) });
+          rows.push({ key: 'Center Z', value: center.z.toFixed(1) });
+        }
+      }
+    }
+    return rows;
+  }
 
   if (layer.object) {
     let totalPoints = 0;

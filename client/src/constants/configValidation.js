@@ -133,7 +133,10 @@ export function validateConfig(config) {
   validateBasicStructure(config);
   if (config.basemaps?.length) {
     validateBaseLayers(config.basemaps);
-    validateLayerVisibility(config.basemaps);
+    // Skip strict visibility check when OSM background is enabled — the map won't be empty.
+    if (!config.osm_background) {
+      validateLayerVisibility(config.basemaps);
+    }
   }
   validateOverlayLayers(config.data_layers);
   return true;

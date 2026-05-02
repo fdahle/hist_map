@@ -67,10 +67,23 @@
             <span class="flag-desc">Allow non-admin users to open the map viewer</span>
           </div>
           <div class="toggle-switch">
+            <input id="flag-map-access" v-model="draft.ui.map_access" type="checkbox" @change="scheduleSave" />
+            <label for="flag-map-access" class="slider"></label>
+          </div>
+        </div>
+
+        <div class="flag-row">
+          <div class="flag-info">
+            <span class="flag-label">3D viewer access</span>
+            <span class="flag-desc">Allow non-admin users to open the 3D viewer</span>
+          </div>
+          <div class="toggle-switch">
             <input id="flag-viewer-access" v-model="draft.ui.viewer_access" type="checkbox" @change="scheduleSave" />
             <label for="flag-viewer-access" class="slider"></label>
           </div>
         </div>
+
+        <hr class="flag-divider" />
 
         <div class="flag-row">
           <div class="flag-info">
@@ -260,6 +273,7 @@ async function changePassword() {
 
 /* Flags */
 .flag-list { display: flex; flex-direction: column; }
+.flag-divider { border: none; border-top: 1px solid var(--admin-border, #e8e8e8); margin: 0.25rem 0; }
 .flag-row {
   display: flex; align-items: center; justify-content: space-between; gap: 1rem;
   padding: 0.65rem 0; border-bottom: 1px solid var(--admin-border, #f0f0f0);

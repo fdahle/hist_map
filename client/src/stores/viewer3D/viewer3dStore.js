@@ -10,6 +10,7 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
   const camera = shallowRef(null);
   const renderer = shallowRef(null);
   const controls = shallowRef(null);
+  const giro3dInstance = shallowRef(null);
 
   // Models and scene state
   const loadedModels = ref([]);
@@ -74,6 +75,10 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
 
   const setControls = (newControls) => {
     controls.value = newControls;
+  };
+
+  const setGiro3dInstance = (inst) => {
+    giro3dInstance.value = inst;
   };
 
   // Model management
@@ -216,14 +221,17 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
     loadedModels.value = [];
     
     clearMeasurements();
-    
-    if (renderer.value) {
+
+    if (giro3dInstance.value) {
+      giro3dInstance.value.dispose();
+      giro3dInstance.value = null;
+    } else if (renderer.value) {
       renderer.value.dispose();
-      renderer.value = null;
     }
-    
+
     scene.value = null;
     camera.value = null;
+    renderer.value = null;
     controls.value = null;
   };
 
@@ -233,10 +241,12 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
     camera,
     renderer,
     controls,
+    giro3dInstance,
     setScene,
     setCamera,
     setRenderer,
     setControls,
+    setGiro3dInstance,
 
     // Models
     loadedModels,

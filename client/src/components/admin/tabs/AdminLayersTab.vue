@@ -78,6 +78,7 @@
             </template>
             <template v-else>
               <span v-if="layer.optimized" class="status-text status-ok">✓ Optimized</span>
+              <span v-if="layer.processingLog?.some(s => s.startsWith('Geometry simplified'))" class="status-text status-ok">✓ Simplified</span>
             </template>
           </div>
           <div class="lc-actions">
@@ -87,6 +88,11 @@
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+            <button class="action-btn" title="Info" @click="infoLayer = layer">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
               </svg>
             </button>
             <button class="action-btn action-btn-danger" :disabled="layer.status === 'optimizing' || deletePending[layer.id]"
@@ -306,6 +312,7 @@
       @cancel="cancelUpload"
       @remove="removePendingFile"
     />
+    <LayerInfoModal :layer="infoLayer" @close="infoLayer = null" />
   </section>
 </template>
 
@@ -313,6 +320,7 @@
 import { ref, computed, inject, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { getApiUrl } from '../../../utils/config';
 import UploadSettingsModal from '../../modals/admin/UploadSettingsModal.vue';
+import LayerInfoModal from '../../modals/admin/LayerInfoModal.vue';
 
 // ── Injected from AdminView ────────────────────────────────────────────────────
 const authHeader  = inject('authHeader');
@@ -330,6 +338,7 @@ const uploadPending    = ref(false);
 const uploadProgress   = ref(0);
 const deletePending    = ref({});
 const deleteConfirmId  = ref(null);
+const infoLayer        = ref(null);
 const editingId        = ref(null);
 const editDraft        = ref({});
 const editError        = ref('');

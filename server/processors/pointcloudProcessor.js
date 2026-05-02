@@ -39,7 +39,7 @@ export async function convertToCopc(inputPath, options = {}) {
   if (!(await isPdalAvailable())) {
     return {
       success: false,
-      step: 'PDAL not available on this server — point cloud stored as-is (COPC conversion skipped)',
+      step: 'COPC: skipped (PDAL unavailable)',
       originalBackup: null,
     };
   }
@@ -51,7 +51,7 @@ export async function convertToCopc(inputPath, options = {}) {
 
   // Already COPC — nothing to do
   if (origExt === '.copc.laz') {
-    return { success: true, step: 'Already in COPC format — no conversion needed.', originalBackup: null };
+    return { success: true, step: 'COPC: already converted', originalBackup: null };
   }
 
   const outputPath   = path.join(dir, `${baseName}.copc.laz`);
@@ -85,7 +85,7 @@ export async function convertToCopc(inputPath, options = {}) {
 
     return {
       success: true,
-      step: `Converted to COPC: ${path.basename(outputPath)}`,
+      step: `COPC: converted`,
       originalBackup,
     };
   } catch (err) {
@@ -93,9 +93,31 @@ export async function convertToCopc(inputPath, options = {}) {
     await fsPromises.unlink(tempOutput).catch(() => {});
     return {
       success: false,
-      step:    `COPC conversion failed: ${String(err.message).slice(0, 200)}`,
+      step:    `COPC: conversion failed`,
       originalBackup: null,
     };
+  }
+}
+
+/**
+ * Extract basic metadata from a LAS/LAZ/COPC file using PDAL.
+ * Returns null if PDAL is not available or the file cannot be read.
+ *
+ * @param {string} filePath  Absolute path to the point cloud file
+ * @returns {{ pointCount: number|null, bbox: number[]|null } | null}
+ */
+export async function extractPointCloudInfo(filePath) {
+  if (!(await isPdalAvailable())) return null;
+  try {
+    const { stdout } = await execFileAsync('pdal', ['info', '--summary', filePath], { maxBuffer: 10 * 1024 * 1024 });
+    const info    = JSON.parse(stdout);
+    const summary = info.summary ?? {};
+    const pointCount = summary.num_points ?? null;
+    const b = summary.bounds;
+    const bbox = (b && b.minx != null) ? [b.minx, b.miny, b.maxx, b.maxy] : null;
+    return { pointCount, bbox };
+  } catch {
+    return null;
   }
 }
 

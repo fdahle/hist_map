@@ -11,6 +11,10 @@ const router = createRouter({
   routes: [
     {
       path: '/',
+      redirect: '/map'
+    },
+    {
+      path: '/map',
       name: 'map',
       component: MapView,
       meta: { title: 'Map' }
@@ -31,6 +35,18 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  if (to.name === 'map') {
+    try {
+      const res = await fetch(getApiUrl('/map/access-status'))
+      if (res.ok) {
+        const v = await res.json()
+        if (v.mapEnabled === false) {
+          return { name: '3d-viewer' }
+        }
+      }
+    } catch { /* server unreachable — allow through */ }
+  }
+
   if (to.name === '3d-viewer') {
     try {
       const res = await fetch(getApiUrl('/viewer/access-status'))

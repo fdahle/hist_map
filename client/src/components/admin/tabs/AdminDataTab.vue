@@ -83,6 +83,11 @@
                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
               </svg>
             </button>
+            <button class="action-btn" title="Info" @click="infoLayer = layer">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+              </svg>
+            </button>
             <button class="action-btn action-btn-danger" :disabled="deletePending[layer.id]"
               title="Delete" @click="confirmDelete(layer)">
               <svg v-if="!deletePending[layer.id]" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -156,6 +161,7 @@
       </div>
     </div>
     </div>
+    <LayerInfoModal :layer="infoLayer" @close="infoLayer = null" />
   </section>
 </template>
 
@@ -163,6 +169,7 @@
 import { ref, computed, inject, onMounted, watch, nextTick } from 'vue';
 import { getApiUrl } from '../../../utils/config';
 import CsvDataUploadModal from '../../modals/admin/CsvDataUploadModal.vue';
+import LayerInfoModal from '../../modals/admin/LayerInfoModal.vue';
 
 // ── Injected from AdminView ────────────────────────────────────────────────────
 const authHeader = inject('authHeader');
@@ -179,6 +186,7 @@ const uploadPending      = ref(false);
 const uploadProgress     = ref(0);
 const deletePending      = ref({});
 const deleteConfirmId    = ref(null);
+const infoLayer          = ref(null);
 const editingId          = ref(null);
 const editDraft          = ref({});
 const editError          = ref('');
@@ -469,7 +477,7 @@ async function toggleDataPreview(layerId) {
 .columns-preview { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.25rem; }
 .col-chip {
   font-size: 0.72rem; padding: 0.15rem 0.45rem; border-radius: 3px;
-  background: #cffafe; color: #0e7490; font-family: monospace;
+  background: #cffafe; color: #0e7490;
 }
 :global(body.theme-dark) .col-chip { background: rgba(8,145,178,0.2); color: #22d3ee; }
 

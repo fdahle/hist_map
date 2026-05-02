@@ -196,9 +196,10 @@ function blankDraft() {
     view: { center: [0, 0], zoom: 7, minZoom: 0, maxZoom: 28, extent: null },
     crs: 'EPSG:3857',
     projection_params: { proj_string: '', extent: null },
-    basemaps:    [],
-    data_layers: [],
-    ui: { map_download: true, map_upload: true, viewer_download: true, viewer_upload: true, viewer_access: true },
+    basemaps:              [],
+    osm_background_order:  0,
+    data_layers:           [],
+    ui: { map_access: true, map_download: true, map_upload: true, viewer_access: true, viewer_download: true, viewer_upload: true },
   };
 }
 
@@ -220,15 +221,20 @@ function loadConfigIntoDraft(config) {
     d.projection_params.proj_string = config.projection_params.proj_string ?? '';
     d.projection_params.extent      = config.projection_params.extent      ?? null;
   }
-  d.basemaps    = config.basemaps    ?? config.base_layers    ?? d.basemaps;
   osmBackground.value = config.osm_background ?? (config.basemaps?.length > 0 || config.base_layers?.length > 0 ? false : true);
+  // Sort basemaps by their saved order so the first entry is always the default
+  const basemaps = config.basemaps ?? config.base_layers ?? [];
+  if (basemaps.length) basemaps.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  d.basemaps = basemaps;
+  d.osm_background_order = config.osm_background_order ?? 0;
   d.data_layers = config.data_layers ?? config.overlay_layers ?? d.data_layers;
   if (config.ui) {
+    d.ui.map_access      = config.ui.map_access      ?? true;
     d.ui.map_download    = config.ui.map_download    ?? true;
     d.ui.map_upload      = config.ui.map_upload      ?? true;
+    d.ui.viewer_access   = config.ui.viewer_access   ?? true;
     d.ui.viewer_download = config.ui.viewer_download ?? true;
     d.ui.viewer_upload   = config.ui.viewer_upload   ?? true;
-    d.ui.viewer_access   = config.ui.viewer_access   ?? true;
   }
   draft.value = d;
 }
@@ -245,8 +251,9 @@ function buildConfig() {
     out.projection_params = { proj_string: d.projection_params.proj_string };
     if (d.projection_params.extent) out.projection_params.extent = d.projection_params.extent;
   }
-  out.osm_background = osmBackground.value;
-  out.basemaps    = d.basemaps;
+  out.osm_background       = osmBackground.value;
+  out.osm_background_order = d.osm_background_order ?? 0;
+  out.basemaps = d.basemaps.map((l, i) => ({ ...l, order: i, visible: i === 0 }));
   out.data_layers = d.data_layers;
   out.ui = { ...d.ui };
   return out;
@@ -373,8 +380,8 @@ function logout() {
   localStorage.removeItem('admin_pwd');
   clearTimeout(_sessionTimeoutId);
   isAuthenticated.value = false;
-  osmBackground.value   = true;
-  draft.value           = blankDraft();
+  osmBackground.value = true;
+  draft.value         = blankDraft();
   password.value        = '';
   passwordConfirm.value = '';
   loginError.value      = '';

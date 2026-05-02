@@ -1,5 +1,6 @@
 <template>
   <teleport to="body">
+    <Transition name="lim-fade">
     <div v-if="isVisible" class="lim-backdrop" @click.self="close">
       <div class="lim-modal">
         <div class="lim-header">
@@ -31,6 +32,7 @@
         </div>
       </div>
     </div>
+    </Transition>
   </teleport>
 </template>
 
@@ -58,74 +60,138 @@ onUnmounted(() => document.removeEventListener('keydown', handleEsc));
 </script>
 
 <style scoped>
+/* ── Transition ─────────────────────────────────────────────────────────────── */
+.lim-fade-enter-active,
+.lim-fade-leave-active { transition: opacity 0.15s ease; }
+.lim-fade-enter-from,
+.lim-fade-leave-to { opacity: 0; }
+
+/* ── Backdrop ───────────────────────────────────────────────────────────────── */
 .lim-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.55);
   z-index: 10000;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+/* ── Modal shell ────────────────────────────────────────────────────────────── */
 .lim-modal {
-  background: #fff;
+  background: rgba(30, 30, 30, 0.97);
+  border: 1px solid #444;
   border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(10px);
   min-width: 320px;
   max-width: 480px;
   width: 90%;
-  font-family: "Segoe UI", sans-serif;
+  font-family: 'Segoe UI', sans-serif;
+  color: #e0e0e0;
   overflow: hidden;
 }
 
-.theme-dark .lim-modal {
-  background: #2a2a2a;
-  color: #e0e0e0;
+.theme-light .lim-modal {
+  background: rgba(255, 255, 255, 0.97);
+  border-color: #ccc;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  color: #333;
 }
 
+/* ── Header ─────────────────────────────────────────────────────────────────── */
 .lim-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 16px;
-  background: #343a40;
-  color: #fff;
+  padding: 12px 16px;
+  background: rgba(40, 40, 40, 0.85);
+  border-bottom: 1px solid #444;
+  border-radius: 8px 8px 0 0;
+}
+
+.theme-light .lim-header {
+  background: rgba(248, 249, 250, 0.97);
+  border-bottom-color: #ddd;
 }
 
 .lim-icon {
   flex-shrink: 0;
   display: flex;
   align-items: center;
+  color: #4a9eff;
+}
+
+.lim-icon :deep(svg) {
+  width: 16px;
+  height: 16px;
+  stroke: #4a9eff;
+}
+
+.theme-light .lim-icon {
+  color: #2563eb;
+}
+
+.theme-light .lim-icon :deep(svg) {
+  stroke: #2563eb;
 }
 
 .lim-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   flex: 1;
-  color: #fff;
+  color: #e0e0e0;
+}
+
+.theme-light .lim-title {
+  color: #333;
 }
 
 .lim-close {
   background: none;
   border: none;
-  color: rgba(255,255,255,0.7);
+  color: #aaa;
   cursor: pointer;
   padding: 4px;
   display: flex;
   align-items: center;
   border-radius: 4px;
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
-.lim-close:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
+.lim-close :deep(svg) {
+  width: 14px;
+  height: 14px;
+}
+
+.lim-close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.theme-light .lim-close {
+  color: #666;
+}
+
+.theme-light .lim-close:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+}
+
+/* ── Body ───────────────────────────────────────────────────────────────────── */
 .lim-body {
-  padding: 12px 0;
+  padding: 8px 0;
   max-height: 60vh;
   overflow-y: auto;
 }
 
+.lim-body::-webkit-scrollbar { width: 6px; }
+.lim-body::-webkit-scrollbar-track { background: transparent; }
+.lim-body::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
+.theme-light .lim-body::-webkit-scrollbar-thumb { background: #bbb; }
+
+/* ── Table ──────────────────────────────────────────────────────────────────── */
 .lim-table {
   width: 100%;
   border-collapse: collapse;
@@ -133,44 +199,54 @@ onUnmounted(() => document.removeEventListener('keydown', handleEsc));
 }
 
 .lim-table tr:nth-child(even) {
-  background: #f5f5f5;
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.theme-dark .lim-table tr:nth-child(even) {
-  background: #333;
+.theme-light .lim-table tr:nth-child(even) {
+  background: rgba(0, 0, 0, 0.03);
 }
 
 .lim-key {
   padding: 8px 16px;
   font-weight: 600;
-  color: #555;
+  color: #aaa;
   white-space: nowrap;
   width: 40%;
+  vertical-align: top;
 }
 
-.theme-dark .lim-key {
-  color: #aaa;
+.theme-light .lim-key {
+  color: #666;
 }
 
 .lim-value {
   padding: 8px 16px;
-  color: #222;
+  color: #e0e0e0;
   word-break: break-all;
 }
 
-.theme-dark .lim-value {
-  color: #e0e0e0;
+.theme-light .lim-value {
+  color: #222;
 }
 
 .lim-url {
-  color: #3b82f6;
+  color: #4a9eff;
   text-decoration: none;
   word-break: break-all;
 }
-.lim-url:hover { text-decoration: underline; }
-.theme-dark .lim-url { color: #60a5fa; }
 
+.lim-url:hover { text-decoration: underline; }
+
+.theme-light .lim-url { color: #2563eb; }
+
+/* ── Separator ──────────────────────────────────────────────────────────────── */
 .lim-separator-row td { padding: 0 16px; }
-.lim-separator { border: none; border-top: 1px solid #e5e7eb; margin: 4px 0; }
-.theme-dark .lim-separator { border-top-color: #444; }
+
+.lim-separator {
+  border: none;
+  border-top: 1px solid #3a3a3a;
+  margin: 4px 0;
+}
+
+.theme-light .lim-separator { border-top-color: #e0e0e0; }
 </style>

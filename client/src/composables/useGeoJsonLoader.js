@@ -38,6 +38,7 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
       url: layer.url,
       layerId: layer._layerId,
       layerName: layer.name,
+      featureCount: layer.featureCount ?? null,
       debug: !!(window.__APP_DEBUG__ || import.meta.env.DEV),
     });
 
@@ -181,7 +182,7 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
           source.addFeatures(features);
         }
 
-        layerStore.setLayerProgress(layer._layerId, Math.round(((chunkIndex + 1) / totalChunks) * 100));
+        if (totalChunks > 0) layerStore.setLayerProgress(layer._layerId, Math.round(((chunkIndex + 1) / totalChunks) * 100));
       }
 
       if (type === "COMPLETE") {

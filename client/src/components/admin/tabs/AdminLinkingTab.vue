@@ -247,10 +247,12 @@ const links = ref({ csvLinks: [], featureLinks: [] });
 // ── Autosave ───────────────────────────────────────────────────────────────────
 const saveState = ref('idle');
 const saveError = ref('');
-let saveTimer   = null;
+let saveTimer      = null;
+let loadingLinks   = false;
 
 function scheduleSave() {
   if (!selectedLayerId.value) return;
+  if (loadingLinks) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveLinks, 600);
 }
@@ -289,6 +291,7 @@ async function fetchAllLayers() {
 
 async function fetchLayerData(layerId) {
   layerLoading.value = true;
+  loadingLinks = true;
   links.value = { csvLinks: [], featureLinks: [] };
   features.value = [];
   geojsonColumns.value = [];
@@ -309,7 +312,10 @@ async function fetchLayerData(layerId) {
       geojsonColumns.value = data.columns ?? [];
     }
   } catch { /* non-fatal */ }
-  finally { layerLoading.value = false; }
+  finally {
+    loadingLinks = false;
+    layerLoading.value = false;
+  }
 }
 
 async function onLayerChange() {
@@ -603,7 +609,7 @@ function shortName(name) {
 }
 .csv-link-info { flex: 1; min-width: 0; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .csv-link-name { font-size: 0.82rem; font-weight: 500; }
-.csv-link-join { font-size: 0.75rem; color: var(--admin-muted, #777); font-family: monospace; }
+.csv-link-join { font-size: 0.75rem; color: var(--admin-muted, #777); }
 
 /* CSV add form */
 .csv-add-form {

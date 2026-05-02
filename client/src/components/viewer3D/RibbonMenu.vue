@@ -228,8 +228,8 @@
           </div>
           <span class="group-label">Appearance</span>
         </div>
-        <!-- Color Mode – pointcloud layers only -->
-        <div v-if="selectedLayer.type === 'pointcloud'" class="ribbon-group">
+        <!-- Color Mode – pointcloud/copc layers only -->
+        <div v-if="selectedLayer.type === 'pointcloud' || selectedLayer.type === 'copc'" class="ribbon-group">
           <div class="ribbon-group-buttons">
             <div class="ctx-color-mode">
               <select :value="localColorMode" class="ctx-select" title="Point cloud color mode" @change="onColorModeChange">
@@ -243,8 +243,8 @@
           <span class="group-label">Color Mode</span>
         </div>
 
-        <!-- Point Size – pointcloud layers only -->
-        <div v-if="selectedLayer.type === 'pointcloud'" class="ribbon-group">
+        <!-- Point Size – pointcloud/copc layers only -->
+        <div v-if="selectedLayer.type === 'pointcloud' || selectedLayer.type === 'copc'" class="ribbon-group">
           <div class="ribbon-group-buttons">
             <div class="ctx-point-size">
               <div class="ctx-range-row">
@@ -459,10 +459,12 @@ watch(() => props.selectedLayer, (newLayer) => {
   }
 });
 
-// Track point size for pointcloud layers
+// Track point size for pointcloud/copc layers
 const localPointSize = ref(2);
 watch(() => props.selectedLayer, (layer) => {
-  if (layer?.type === 'pointcloud' && layer.object) {
+  if (layer?.type === 'copc') {
+    localPointSize.value = parseFloat((layer.object?.userData?.pointSize ?? 2).toFixed(1));
+  } else if (layer?.type === 'pointcloud' && layer.object) {
     let size = 2;
     layer.object.traverse?.((child) => {
       if (child.isPoints && child.material) size = child.material.size ?? 2;
@@ -512,7 +514,7 @@ const toggleSelectedVisibility = () => {
 // Color mode for point cloud layers
 const localColorMode = ref('rgb');
 watch(() => props.selectedLayer, (layer) => {
-  if (layer?.type === 'pointcloud') {
+  if (layer?.type === 'pointcloud' || layer?.type === 'copc') {
     localColorMode.value = layer.object?.userData?.colorMode ?? 'rgb';
   }
 }, { immediate: true });

@@ -687,6 +687,11 @@ const onRibbonLayerVisibility = ({ layer, visible }) => {
 
 const onRibbonLayerPointSize = ({ layer, size }) => {
   if (!layer) return;
+  if (layer.object?.userData?.type === 'copc') {
+    canvasRef.value?.setCOPCPointSize(layer.id, size);
+    if (layer.object) layer.object.userData.pointSize = size;
+    return;
+  }
   layerManagerRef.value?.setPointSizeById(layer.id, size);
 };
 

@@ -23,14 +23,15 @@ import { v4 as uuidv4 } from 'uuid';
 import { parse as csvParse } from 'csv-parse/sync';
 
 import { normalizeFilename }     from '../src/utils.js';
-import { processGeoJsonObject, linkAssetsToFeatures } from './shapeProcessor.js';
-import { convertToCopc } from './pointcloudProcessor.js';
+import { processGeoJsonObject, linkAssetsToFeatures, computeGeojsonStats } from './shapeProcessor.js';
+import { convertToCopc, extractPointCloudInfo } from './pointcloudProcessor.js';
 import { extractGeoTiffInfo } from './geotiffProcessor.js';
 import epsg from 'epsg-index/all.json' with { type: 'json' };
 import {
   createLayerMeta,
   createSubFileMeta,
   writeLayerMeta,
+  writeFeatureIndex,
   readLayerMeta,
   resolveInDir,
   safeLayerExt,
@@ -55,6 +56,41 @@ export function classifyExt(filename) {
   if (POINTCLOUD_EXTS.has(ext)) return 'pointcloud';
   if (ext === '.csv')           return 'csv';
   return 'unknown';
+}
+
+function countModelElements(buffer, ext) {
+  try {
+    if (ext === '.ply') {
+      const header = buffer.slice(0, Math.min(4096, buffer.length)).toString('utf8');
+      const vertMatch = header.match(/element vertex\s+(\d+)/);
+      const faceMatch = header.match(/element face\s+(\d+)/);
+      return {
+        vertices: vertMatch ? parseInt(vertMatch[1], 10) : null,
+        faces:    faceMatch ? parseInt(faceMatch[1], 10) : null,
+      };
+    }
+    if (ext === '.obj') {
+      let vertices = 0, faces = 0, lineStart = true;
+      for (let i = 0; i < buffer.length; i++) {
+        const b = buffer[i];
+        if (lineStart) {
+          const next = buffer[i + 1];
+          if      (b === 0x76 && (next === 0x20 || next === 0x09)) vertices++; // 'v '
+          else if (b === 0x66 && (next === 0x20 || next === 0x09)) faces++;    // 'f '
+        }
+        lineStart = (b === 0x0a); // '\n'
+      }
+      return { vertices: vertices || null, faces: faces || null };
+    }
+    if (ext === '.stl') {
+      // Binary STL: bytes 0-79 header, bytes 80-83 uint32 face count
+      if (buffer.length > 84) {
+        const faces = buffer.readUInt32LE(80);
+        return { vertices: null, faces };
+      }
+    }
+  } catch { /* ignore parse errors */ }
+  return { vertices: null, faces: null };
 }
 
 function isCompanion(filename) {
@@ -118,7 +154,12 @@ export async function processUploadBatch(files, layersDir, allSettings = {}) {
   for (const f of files) {
     if (isCompanion(f.originalname)) byType.companion.push(f);
     else {
-      const kind = classifyExt(f.originalname);
+      let kind = classifyExt(f.originalname);
+      // A PLY with no faces is a point cloud, not a mesh
+      if (kind === 'model' && path.extname(f.originalname).toLowerCase() === '.ply') {
+        const { faces } = countModelElements(f.buffer, '.ply');
+        if (faces === null || faces === 0) kind = 'pointcloud';
+      }
       if (kind !== 'unknown') byType[kind].push(f);
     }
   }
@@ -182,28 +223,38 @@ async function _processGeoJsonLayer(geoFile, fileMap, layersDir, allSettings) {
     meta.originalBackup = backupName;
   }
 
+  const features = processed.features ?? [];
+
   const saveAsNdjson = settings.optimize === 'ndjson';
+  let fileSizeBytes = 0;
   if (saveAsNdjson) {
     const ndjsonHeader = JSON.stringify({ _crs: targetCrs ?? null });
-    const ndjsonBody   = (processed.features ?? []).map(f => JSON.stringify(f)).join('\n');
-    await fs.writeFile(path.join(layerDir, `${id}.geojsonl`), `${ndjsonHeader}\n${ndjsonBody}`, 'utf8');
-    meta.extension = '.geojsonl';
-    meta.optimized = true;
-    steps.push('Saved as NDJSON (.geojsonl) for streaming-efficient access');
+    const ndjsonBody   = features.map(f => JSON.stringify(f)).join('\n');
+    const ndjsonStr    = `${ndjsonHeader}\n${ndjsonBody}`;
+    await fs.writeFile(path.join(layerDir, `${id}.geojsonl`), ndjsonStr, 'utf8');
+    fileSizeBytes      = Buffer.byteLength(ndjsonStr, 'utf8');
+    meta.extension     = '.geojsonl';
+    meta.optimized     = true;
+    steps.push('Saved as optimized NDJSON (line-delimited GeoJSON).');
   } else {
-    await fs.writeFile(path.join(layerDir, `${id}.geojson`), JSON.stringify(processed), 'utf8');
-    steps.push('Saved as GeoJSON (.geojson)');
+    const geojsonStr = JSON.stringify(processed);
+    await fs.writeFile(path.join(layerDir, `${id}.geojson`), geojsonStr, 'utf8');
+    fileSizeBytes    = Buffer.byteLength(geojsonStr, 'utf8');
+    steps.push('Saved as GeoJSON.');
   }
-  meta.processingLog = steps;
-  meta.sourceCrs     = sourceCrs ?? null;
-  meta.targetCrs     = targetCrs ?? null;
-  meta.featureCount  = processed.features?.length ?? null;
-  meta.featureIndex  = processed.features?.map((f, i) => ({ id: f.properties?._featureId ?? null, index: i })) ?? null;
+
+  const { bbox, propertySchema } = computeGeojsonStats(features);
+
+  meta.processingLog  = steps;
+  meta.sourceCrs      = sourceCrs ?? null;
+  meta.targetCrs      = targetCrs ?? null;
+  meta.bbox           = bbox;
+  meta.fileSizeBytes  = fileSizeBytes;
+  meta.featureCount   = features.length;
+  meta.propertySchema = propertySchema;
 
   // Detect dominant geometry type from features
-  const geomTypes = new Set(
-    (processed.features ?? []).map(f => f.geometry?.type).filter(Boolean)
-  );
+  const geomTypes = new Set(features.map(f => f.geometry?.type).filter(Boolean));
   meta.geometryType = (
     geomTypes.has('Point')      || geomTypes.has('MultiPoint')      ? 'Point' :
     geomTypes.has('LineString') || geomTypes.has('MultiLineString') ? 'LineString' :
@@ -212,6 +263,10 @@ async function _processGeoJsonLayer(geoFile, fileMap, layersDir, allSettings) {
   );
 
   await writeLayerMeta(layersDir, id, meta);
+
+  // Feature index is written to a separate sidecar to keep meta.json small.
+  const featureIndex = features.map((f, i) => ({ id: f.properties?._featureId ?? null, index: i }));
+  await writeFeatureIndex(layersDir, id, featureIndex);
 
   return {
     id,
@@ -237,14 +292,18 @@ async function _saveModelSubFile(modelFile, fileMap, parentLayerId, layerDir) {
   const subMeta = createSubFileMeta({ id: subId, originalName: modelFile.originalname, fileType: 'model', role: 'model' });
 
   if (ext === '.obj') {
-    let objContent = modelFile.buffer.toString('utf8');
     const mtlOrigName = path.parse(modelFile.originalname).name + '.mtl';
     const mtlBuf      = fileMap.get(mtlOrigName) ?? fileMap.get(normalizeFilename(mtlOrigName));
 
     if (mtlBuf) {
-      const mtlSubId  = uuidv4();
-      const mtlFile   = `${mtlSubId}.mtl`;
-      objContent      = objContent.replace(/^mtllib\s+.+$/m, `mtllib ${mtlFile}`);
+      const mtlSubId = uuidv4();
+      const mtlFile  = `${mtlSubId}.mtl`;
+
+      // mtllib is always near the top — only stringify the first 8 KB to patch it
+      const SCAN = Math.min(8192, modelFile.buffer.length);
+      let header = modelFile.buffer.slice(0, SCAN).toString('utf8');
+      header = header.replace(/^mtllib\s+.+$/m, `mtllib ${mtlFile}`);
+      const objBuf = Buffer.concat([Buffer.from(header, 'utf8'), modelFile.buffer.slice(SCAN)]);
 
       const textureRefs = extractTextureRefs(mtlBuf.toString('utf8'));
       let mtlContent    = mtlBuf.toString('utf8');
@@ -269,8 +328,10 @@ async function _saveModelSubFile(modelFile, fileMap, parentLayerId, layerDir) {
         createSubFileMeta({ id: mtlSubId, originalName: mtlOrigName, fileType: 'material', role: 'material' }),
         ...texMeta,
       ];
+      await fs.writeFile(path.join(layerDir, outFile), objBuf);
+    } else {
+      await fs.writeFile(path.join(layerDir, outFile), modelFile.buffer);
     }
-    await fs.writeFile(path.join(layerDir, outFile), objContent, 'utf8');
   } else {
     await fs.writeFile(path.join(layerDir, outFile), modelFile.buffer);
   }
@@ -297,7 +358,11 @@ async function _processStandaloneModel(modelFile, fileMap, layersDir, allSetting
   await fs.rename(tmpFile, path.join(layerDir, outFile)).catch(() => {});
   if (subRes.subMeta.companions) meta.subFiles.push(...subRes.subMeta.companions);
 
-  meta.processingLog = [`Saved 3D model: ${modelFile.originalname}`];
+  meta.fileSizeBytes = modelFile.buffer.length;
+  const { vertices: vertexCount, faces: faceCount } = countModelElements(modelFile.buffer, ext);
+  if (vertexCount != null) meta.vertexCount = vertexCount;
+  if (faceCount   != null) meta.faceCount   = faceCount;
+  meta.processingLog = [`Saved as ${ext.replace('.', '').toUpperCase()} model.`];
   await writeLayerMeta(layersDir, id, meta);
 
   return {
@@ -333,15 +398,22 @@ async function _processStandalonePointcloud(pcFile, layersDir, allSettings) {
 
   const isCOPC = ext.endsWith('.copc.laz');
   const wantsCOPC = settings.optimize === 'copc';
-  const step   = isCOPC
-    ? 'Stored as Cloud Optimised Point Cloud (COPC) — ready for streaming'
-    : wantsCOPC
-      ? 'Point cloud saved — COPC conversion queued (will be optimised in the background)'
-      : 'Stored as-is — enable "Optimise as COPC" in upload settings for better streaming performance';
+  const extLabel = ext.replace(/^\./, '').toUpperCase();
+  const step = `Saved as ${extLabel} point cloud.`;
 
+  meta.fileSizeBytes = pcFile.buffer.length;
+  if (wantsCOPC && !isCOPC) meta.originalSizeBytes = pcFile.buffer.length;
   meta.processingLog = [step];
   meta.status        = wantsCOPC && !isCOPC ? 'optimizing' : 'ready';
   if (wantsCOPC && !isCOPC) meta.optimizationType = 'copc';
+
+  // Extract point count and bbox from the file header (requires PDAL).
+  const pcInfo = await extractPointCloudInfo(path.join(layerDir, mainFile));
+  if (pcInfo) {
+    if (pcInfo.pointCount != null) meta.pointCount = pcInfo.pointCount;
+    if (pcInfo.bbox)               meta.bbox       = pcInfo.bbox;
+  }
+
   await writeLayerMeta(layersDir, id, meta);
 
   return {
@@ -377,9 +449,8 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
   }
 
   const wantsCOG = settings.optimize === 'cog';
-  const step     = wantsCOG
-    ? 'GeoTIFF saved — COG conversion queued (will be optimised in the background)'
-    : 'GeoTIFF stored as-is (enable "Optimise as COG" for better streaming performance)';
+  const extLabel = ext.replace('.', '').toUpperCase();
+  const step = `Saved as ${extLabel} raster.`;
 
   meta.processingLog = [step];
   meta.status        = wantsCOG ? 'optimizing' : 'ready';
@@ -392,6 +463,9 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
   // Extract CRS and raster info from the file using GDAL (if available).
   // This populates sourceCrs in the meta and tiffProjection in layerConfig
   // so the client can pre-register the projection before rendering.
+  meta.fileSizeBytes = tifFile.buffer.length;
+  if (wantsCOG) meta.originalSizeBytes = tifFile.buffer.length;
+
   const mainFilePath = path.join(layerDir, mainFile);
   const gdalInfo = await extractGeoTiffInfo(mainFilePath);
   if (gdalInfo?.crs) {
@@ -402,9 +476,13 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
     const epsgNum = gdalInfo.crs.split(':')[1];
     const proj4Str = epsg[epsgNum]?.proj4 ?? null;
     if (proj4Str) meta.layerConfig.tiffProj4 = proj4Str;
-    meta.processingLog.push(`Detected CRS: ${gdalInfo.crs}`);
+    meta.processingLog.push(`Coordinate reference system detected: ${gdalInfo.crs}.`);
   }
-  if (gdalInfo?.bands != null) meta.layerConfig.bandCount = gdalInfo.bands;
+  if (gdalInfo?.bands    != null) meta.layerConfig.bandCount = gdalInfo.bands;
+  if (gdalInfo?.size     != null) meta.rasterSize  = gdalInfo.size;
+  if (gdalInfo?.resolution)       meta.resolution  = gdalInfo.resolution;
+  if (gdalInfo?.bbox)             meta.bbox        = gdalInfo.bbox;
+  if (gdalInfo?.bandStats)        meta.bandStats   = gdalInfo.bandStats;
 
   // User-supplied CRS override (from upload modal settings) takes precedence.
   const sourceCrs = settings.cogOptions?.sourceCrs ?? null;
@@ -445,7 +523,6 @@ async function _processCsvDataLayer(csvFile, layersDir, allSettings) {
 
   await fs.writeFile(path.join(layerDir, `${id}.csv`), csvFile.buffer);
 
-  // Read first line to detect column headers for preview
   const text = csvFile.buffer.toString('utf8');
   const firstNewline = text.indexOf('\n');
   const headerLine   = firstNewline !== -1 ? text.slice(0, firstNewline).trim() : text.trim();
@@ -455,7 +532,10 @@ async function _processCsvDataLayer(csvFile, layersDir, allSettings) {
     if (records.length > 0) meta.csvColumns = Object.keys(records[0]);
   } catch { /* non-fatal — columns will be detected on demand */ }
 
-  meta.processingLog = [`Saved CSV data file: ${csvFile.originalname}`];
+  meta.fileSizeBytes = csvFile.buffer.length;
+  meta.csvDelimiter  = delimiter;
+  meta.rowCount      = Math.max(0, text.split('\n').filter(l => l.trim()).length - 1);
+  meta.processingLog = ['Saved as CSV.'];
   await writeLayerMeta(layersDir, id, meta);
 
   return {
@@ -542,6 +622,11 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
   // 1. Process model files (OBJ/PLY/STL) — each may absorb its MTL + textures
   for (const file of files) {
     if (classifyExt(file.originalname) !== 'model') continue;
+    // Vertex-only PLY → point cloud, handled in step 2
+    if (path.extname(file.originalname).toLowerCase() === '.ply') {
+      const { faces } = countModelElements(file.buffer, '.ply');
+      if (faces === null || faces === 0) continue;
+    }
     const subRes = await _saveModelSubFile(file, fileMap, layerId, layerDir);
     consumedNames.add(file.originalname);
     consumedNames.add(normalizeFilename(file.originalname));
@@ -557,9 +642,16 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
     newSubFiles.push(subRes.subMeta);
   }
 
-  // 2. Process point cloud files
+  // 2. Process point cloud files (including vertex-only PLY)
   for (const file of files) {
-    if (classifyExt(file.originalname) !== 'pointcloud') continue;
+    if (consumedNames.has(file.originalname) || consumedNames.has(normalizeFilename(file.originalname))) continue;
+    const fileKind = classifyExt(file.originalname);
+    if (fileKind === 'model' && path.extname(file.originalname).toLowerCase() === '.ply') {
+      const { faces } = countModelElements(file.buffer, '.ply');
+      if (faces !== null && faces > 0) continue; // mesh PLY — skip, already handled above
+    } else if (fileKind !== 'pointcloud') {
+      continue;
+    }
     const pcSettings = allSettings[file.originalname] ?? {};
     const subId = uuidv4();
     const ext   = pointcloudExt(file.originalname);

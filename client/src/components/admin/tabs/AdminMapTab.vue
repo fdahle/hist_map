@@ -78,63 +78,85 @@
       </div>
     </div>
 
-    <!-- ── Background ─────────────────────────────────────────────────────── -->
-    <div class="settings-card">
-      <h3 class="card-title">Background</h3>
-      <div class="field-row">
-        <div class="field">
-          <label class="checkbox-label">
-            <div class="toggle-switch">
-              <input id="osm-bg" v-model="osmBackground" type="checkbox" />
-              <label for="osm-bg" class="slider"></label>
-            </div>
-            OSM background
-            <span class="field-hint-inline">(OpenStreetMap tile layer shown behind all other layers)</span>
-          </label>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Basemaps ───────────────────────────────────────────────────────── -->
+    <!-- ── Background & Basemaps ─────────────────────────────────────────── -->
     <div class="settings-card">
       <div class="card-header">
         <div>
           <h3 class="card-title card-title-inline">Basemaps</h3>
-          <p class="card-desc">Tile, WMS, or WMTS layers shown in the base layer switcher.</p>
+          <p class="card-desc">Tile, WMS, or WMTS layers shown in the base layer switcher. Drag handle to reorder — the top entry is shown first.</p>
         </div>
         <button class="btn-add-sm" @click="openAddBasemap">+ Add Basemap</button>
       </div>
 
-      <div v-if="basemapWarnings.length" class="warn-list">
-        <p v-for="w in basemapWarnings" :key="w" class="warn-line">⚠ {{ w }}</p>
+      <div v-if="noBackgroundWarning" class="warn-list">
+        <p class="warn-line">⚠ No background active — the map will appear empty. Enable OSM or add a basemap.</p>
       </div>
 
-      <div v-if="!draft.basemaps.length" class="empty-state">
-        No basemaps configured. Add one or enable the OSM background above.
-      </div>
-      <div v-else class="layer-list">
-        <div v-for="(layer, idx) in draft.basemaps" :key="idx" class="layer-row">
-          <span class="type-badge" :class="`type-${layer.type}`">{{ layer.type }}</span>
-          <span class="vis-dot" :class="{ visible: layer.visible }" :title="layer.visible ? 'Visible' : 'Hidden'"></span>
-          <div class="layer-info">
-            <span class="layer-name">{{ layer.name }}</span>
-            <span class="layer-url">{{ truncateUrl(layer.url) }}</span>
+      <div class="layer-list">
+        <div
+          v-for="(row, idx) in allRows" :key="row._osm ? '__osm' : row.origIdx"
+          class="layer-row"
+          :class="{
+            'layer-row-osm': row._osm,
+            'row-disabled':  row._osm && !osmBackground,
+            'drag-over':     dropIdx === idx && dropIdx !== dragIdx,
+          }"
+          draggable="true"
+          @dragstart="onDragStart(idx, $event)"
+          @dragover.prevent="onDragOver(idx)"
+          @drop.prevent="onDrop(idx)"
+          @dragend="onDragEnd"
+        >
+          <div class="drag-handle" title="Drag to reorder">
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor">
+              <rect x="2" y="3" width="12" height="1.5" rx="0.75"/>
+              <rect x="2" y="7.25" width="12" height="1.5" rx="0.75"/>
+              <rect x="2" y="11.5" width="12" height="1.5" rx="0.75"/>
+            </svg>
           </div>
-          <span class="order-chip">{{ layer.order }}</span>
-          <div class="row-actions">
-            <button class="action-btn" title="Edit" @click="openEditBasemap(idx)">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-            </button>
-            <button class="action-btn action-btn-danger" title="Delete" @click="removeBasemap(idx)">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
-                <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
-              </svg>
-            </button>
-          </div>
+
+          <!-- OSM built-in row -->
+          <template v-if="row._osm">
+            <span class="type-badge type-tile">tile</span>
+            <div class="layer-info">
+              <span class="layer-name">
+                OpenStreetMap
+                <span class="osm-builtin-tag">(built-in)</span>
+                <span v-if="idx === 0" class="default-badge">default</span>
+              </span>
+              <span class="layer-url">tile.openstreetmap.org</span>
+            </div>
+            <div class="toggle-switch osm-toggle">
+              <input id="osm-bg" v-model="osmBackground" type="checkbox" />
+              <label for="osm-bg" class="slider"></label>
+            </div>
+          </template>
+
+          <!-- Custom basemap row -->
+          <template v-else>
+            <span class="type-badge" :class="`type-${row.layer.type}`">{{ row.layer.type }}</span>
+            <div class="layer-info">
+              <span class="layer-name">
+                {{ row.layer.name }}
+                <span v-if="idx === 0" class="default-badge">default</span>
+              </span>
+              <span class="layer-url">{{ truncateUrl(row.layer.url) }}</span>
+            </div>
+            <div class="row-actions">
+              <button class="action-btn" title="Edit" @click="openEditBasemap(row.origIdx)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                  <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                </svg>
+              </button>
+              <button class="action-btn action-btn-danger" title="Delete" @click="removeBasemap(row.origIdx)">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                  <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+                </svg>
+              </button>
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -156,10 +178,11 @@ import { ref, computed, inject, watch } from 'vue';
 import LayerEditorModal from '../../modals/admin/LayerEditorModal.vue';
 
 // ── Injected from AdminView ────────────────────────────────────────────────────
-const draft       = inject('draft');
+const draft         = inject('draft');
 const osmBackground = inject('osmBackground');
-const loadedCrs   = inject('loadedCrs');
-const authHeader  = inject('authHeader');
+const scheduleSave  = inject('scheduleSave');
+const loadedCrs     = inject('loadedCrs');
+const authHeader    = inject('authHeader');
 
 // ── Projection changed warning ─────────────────────────────────────────────────
 const projectionChanged = computed(() =>
@@ -220,18 +243,52 @@ watch(() => draft.value.view?.extent, (val) => {
   viewExtentStr.value = extentToStr(val);
 }, { immediate: true });
 
-// ── Basemap warnings ───────────────────────────────────────────────────────────
-const basemapWarnings = computed(() => {
-  const layers = draft.value.basemaps ?? [];
-  const warns = [];
-  const visCount = layers.filter(l => l.visible).length;
-  if (visCount > 1) warns.push(`${visCount} basemaps are marked visible — exactly one should be visible at a time.`);
-  if (layers.length > 0 && visCount === 0) warns.push('No basemap is set as visible — the map will have no background.');
-  const orders = layers.map(l => l.order);
-  const dupes = orders.filter((o, i) => orders.indexOf(o) !== i);
-  if (dupes.length) warns.push(`Duplicate order values: ${[...new Set(dupes)].join(', ')}.`);
-  return warns;
+// ── Basemap warnings / state ──────────────────────────────────────────────────
+const noBackgroundWarning = computed(() =>
+  !osmBackground.value && (draft.value.basemaps ?? []).length === 0
+);
+
+// ── Unified basemap rows (OSM + custom, in drag order) ───────────────────────
+const allRows = computed(() => {
+  const basemaps = draft.value.basemaps ?? [];
+  const osmPos = Math.min(draft.value.osm_background_order ?? 0, basemaps.length);
+  const rows = basemaps.map((layer, origIdx) => ({ _osm: false, layer, origIdx }));
+  rows.splice(osmPos, 0, { _osm: true });
+  return rows;
 });
+
+// ── Drag-and-drop reordering ──────────────────────────────────────────────────
+const dragIdx = ref(-1);
+const dropIdx = ref(-1);
+
+function onDragStart(idx, e) {
+  dragIdx.value = idx;
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onDragOver(idx) {
+  dropIdx.value = idx;
+}
+function onDrop(idx) {
+  const from = dragIdx.value;
+  if (from === idx || from === -1) return;
+  const rows = allRows.value.slice();
+  const item = rows.splice(from, 1)[0];
+  rows.splice(idx, 0, item);
+  // Rebuild basemaps and osm position from new order
+  const newBasemaps = [];
+  let newOsmPos = 0;
+  rows.forEach((row, i) => {
+    if (row._osm) newOsmPos = i;
+    else newBasemaps.push(row.layer);
+  });
+  draft.value.basemaps = newBasemaps;
+  draft.value.osm_background_order = newOsmPos;
+  scheduleSave();
+}
+function onDragEnd() {
+  dragIdx.value = -1;
+  dropIdx.value = -1;
+}
 
 // ── Layer editor modal ─────────────────────────────────────────────────────────
 const layerModalOpen  = ref(false);
@@ -253,6 +310,7 @@ function openEditBasemap(idx) {
 }
 function removeBasemap(idx) {
   draft.value.basemaps.splice(idx, 1);
+  scheduleSave();
 }
 function onLayerModalSave(layer) {
   if (layerModalIdx >= 0) {
@@ -356,14 +414,32 @@ input:checked + .slider::after { transform: translateX(16px); }
 .type-wmts  { background: rgba(168,85,247,0.15);  color: #a855f7; }
 .type-wms   { background: rgba(236,72,153,0.15);  color: #ec4899; }
 
-.vis-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--admin-border, #ccc); flex-shrink: 0; }
-.vis-dot.visible { background: #22c55e; }
+.vis-dot { display: none; }
 
 .layer-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .layer-name { font-size: 0.83rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .layer-url  { font-size: 0.72rem; color: var(--admin-muted, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.order-chip { font-size: 0.72rem; color: var(--admin-muted, #999); flex-shrink: 0; min-width: 20px; text-align: center; }
+.order-chip { display: none; }
+
+.layer-row-osm { border-left: 3px solid rgba(99,102,241,0.4); }
+.row-disabled { opacity: 0.45; }
+.osm-builtin-tag { font-size: 0.7rem; color: var(--admin-muted, #999); font-weight: 400; }
+.osm-toggle { margin-left: 0.25rem; flex-shrink: 0; }
+
+.drag-handle {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--admin-muted, #bbb); cursor: grab; flex-shrink: 0; padding: 0 2px;
+}
+.drag-handle:active { cursor: grabbing; }
+.layer-row[draggable="true"] { cursor: default; }
+.layer-row.drag-over { outline: 2px solid #3b82f6; outline-offset: -1px; }
+
+.default-badge {
+  font-size: 0.62rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+  background: rgba(59,130,246,0.12); color: #3b82f6; padding: 0.1rem 0.3rem;
+  border-radius: 3px; vertical-align: middle; margin-left: 4px;
+}
 
 .row-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
 .action-btn {
