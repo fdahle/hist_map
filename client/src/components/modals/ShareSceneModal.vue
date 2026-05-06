@@ -105,8 +105,9 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue';
+import { ref, watch, onUnmounted } from 'vue';
 import { useMapStore } from '@/stores/map/mapStore';
+import { transform } from 'ol/proj';
 import { useLayerStore } from '@/stores/map/layerStore';
 import { usePinStore } from '@/stores/map/pinStore';
 import { ICON_CLOSE } from '@/constants/icons.js';
@@ -128,6 +129,8 @@ const tab = ref('export');
 const exportCode = ref('');
 const importCode = ref('');
 const copyLabel = ref('Copy to Clipboard');
+let copyLabelTimer = null;
+onUnmounted(() => clearTimeout(copyLabelTimer));
 const importWarnings = ref([]);
 const importSuccess = ref(false);
 const importError = ref('');
@@ -187,13 +190,13 @@ const copyToClipboard = async () => {
   try {
     await navigator.clipboard.writeText(exportCode.value);
     copyLabel.value = '✓ Copied!';
-    setTimeout(() => { copyLabel.value = 'Copy to Clipboard'; }, 2000);
+    copyLabelTimer = setTimeout(() => { copyLabel.value = 'Copy to Clipboard'; }, 2000);
   } catch {
     // Fallback for browsers without clipboard API
     exportTextarea.value?.select();
     document.execCommand('copy');
     copyLabel.value = '✓ Copied!';
-    setTimeout(() => { copyLabel.value = 'Copy to Clipboard'; }, 2000);
+    copyLabelTimer = setTimeout(() => { copyLabel.value = 'Copy to Clipboard'; }, 2000);
   }
 };
 
@@ -231,7 +234,6 @@ const loadScene = async () => {
   let center = payload.center;
   if (payload.projection && payload.projection !== currentProj) {
     try {
-      const { transform } = await import('ol/proj');
       center = transform(payload.center, payload.projection, currentProj);
     } catch {
       pendingWarnings.value.push(`Projection mismatch (saved: ${payload.projection}, current: ${currentProj}) – position may be inaccurate.`);
@@ -296,7 +298,6 @@ const restorePins = async (payload, currentProj) => {
   let pins = payload.pins;
   if (payload.projection && payload.projection !== currentProj) {
     try {
-      const { transform } = await import('ol/proj');
       pins = pins.map(p => ({
         ...p,
         coordinate: transform(p.coordinate, payload.projection, currentProj),

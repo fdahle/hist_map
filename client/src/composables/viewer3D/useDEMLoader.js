@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { fromBlob } from 'geotiff';
 import { storeToRefs } from 'pinia';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { demElevationColor } from '@/utils/elevationColor.js';
@@ -26,7 +27,6 @@ export function useDEMLoader({ emit, loadingCancelled, fileLoadedCount, adjustCa
     });
 
     try {
-      const { fromBlob } = await import('geotiff');
       const tiff = await fromBlob(file);
       const image = await tiff.getImage();
 

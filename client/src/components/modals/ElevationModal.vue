@@ -212,7 +212,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useModalDrag } from '@/composables/useModalDrag';
 import { storeToRefs } from 'pinia';
 import { useLayerStore } from '@/stores/map/layerStore';
@@ -325,17 +325,15 @@ const fillPath = computed(() => {
   if (!hasData.value) return '';
   const elevs = props.profileData.elevations;
   let d = '';
-  let segStart = null;
   let segPoints = [];
 
   const closeSeg = () => {
-    if (segPoints.length < 2) { segPoints = []; segStart = null; return; }
+    if (segPoints.length < 2) { segPoints = []; return; }
     const lastX = segPoints[segPoints.length - 1].x;
     d += `M${segPoints[0].x.toFixed(1)},100 `;
     for (const { x, y } of segPoints) d += `L${x.toFixed(1)},${y.toFixed(1)} `;
     d += `L${lastX.toFixed(1)},100 Z `;
     segPoints = [];
-    segStart = null;
   };
 
   for (let i = 0; i < elevs.length; i++) {

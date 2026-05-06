@@ -42,7 +42,7 @@ import "ol/ol.css"; // OpenLayers CSS
 
 import Map from "ol/Map";
 import View from "ol/View";
-import { fromLonLat, toLonLat } from "ol/proj";
+import { fromLonLat, toLonLat, get as getProjection } from "ol/proj";
 import { defaults as defaultControls, ScaleLine } from "ol/control";
 import { defaults as defaultInteractions } from "ol/interaction";
 import Feature from "ol/Feature";
@@ -53,7 +53,6 @@ import { Style, Text, Fill, Stroke, Icon } from "ol/style";
 
 import { registerCustomProjections } from "../../utils/crs";
 import { useMapStore } from "../../stores/map/mapStore";
-import { useLayerStore } from "../../stores/map/layerStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useLayerManager } from "../../composables/useLayerManager";
 import { usePinStore } from "../../stores/map/pinStore";
@@ -82,7 +81,6 @@ const OSM_BG_CONFIGS = {
 };
 const layerManagerRef = inject("layerManager");
 const mapStore = useMapStore();
-const layerStore = useLayerStore();
 
 const mapContainer = ref(null);
 const mapContextMenuRef = ref(null);
@@ -131,25 +129,34 @@ onMounted(async () => {
   let centerProjected;
   const centerValues = config.view.center;
 
-  if (Math.abs(centerValues[0]) > 360 || Math.abs(centerValues[1]) > 360) {
-    // Already in projected coordinates (meters)
-    centerProjected = centerValues;
-  } else {
-    // Geographic coordinates [lon, lat] - transform them
+  // Use the projection's units to decide: 'degrees' = geographic input, anything
+  // else ('m', 'ft', …) = values are already in the projected CRS.
+  const olProj = getProjection(projectionCode);
+  const isGeographic = olProj ? olProj.getUnits() === 'degrees' : Math.abs(centerValues[0]) <= 360;
+
+  if (isGeographic) {
+    // Geographic coordinates [lon, lat] → transform to projected
     centerProjected = fromLonLat(centerValues, projectionCode);
+  } else {
+    // Already in projected coordinates (meters, etc.)
+    centerProjected = centerValues;
   }
 
-  // Restore map position from sessionStorage if available (persists across in-session route changes)
+  // Restore map position from sessionStorage if the user opted in via Settings
   const SESSION_POS_KEY = 'map_position';
   let initialZoom = config.view.zoom;
-  try {
-    const saved = sessionStorage.getItem(SESSION_POS_KEY);
-    if (saved) {
-      const { lng, lat, zoom: z } = JSON.parse(saved);
-      centerProjected = fromLonLat([lng, lat], projectionCode);
-      initialZoom = z;
-    }
-  } catch { /* ignore corrupt storage data */ }
+  if (settingsStore.restoreMapPosition) {
+    try {
+      const saved = sessionStorage.getItem(SESSION_POS_KEY);
+      if (saved) {
+        const { lng, lat, zoom: z } = JSON.parse(saved);
+        centerProjected = fromLonLat([lng, lat], projectionCode);
+        initialZoom = z;
+      }
+    } catch { /* ignore corrupt storage data */ }
+  } else {
+    sessionStorage.removeItem(SESSION_POS_KEY);
+  }
 
   // 3. Get view extent if specified
   const viewExtent = config.view.extent || config.projection_params?.extent;

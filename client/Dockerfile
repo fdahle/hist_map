@@ -1,13 +1,13 @@
+# syntax=docker/dockerfile:1
 # Use Node.js for building Vue app
-FROM node:20-alpine as build
+FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files and install dependencies before copying source so that
+# this layer is only invalidated when dependencies change, not on every edit.
 COPY package*.json ./
-
-# Install dependencies
-RUN npm install
+RUN npm ci
 
 # Copy source code
 COPY . .

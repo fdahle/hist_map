@@ -102,10 +102,8 @@ watch(theme, (newTheme) => {
   document.body.className = `theme-${newTheme}`;
 }, { immediate: true });
 
-// --- 1. RESTORE THIS MISSING PART ---
 const layerManagerRef = ref(null);
 provide("layerManager", layerManagerRef);
-// ------------------------------------
 
 provide("config", appConfig);
 

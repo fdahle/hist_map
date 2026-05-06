@@ -8,7 +8,6 @@ services:
 
   server:
     volumes:
-      - ./input:/app/input:ro
       - ./server/data:/app/server/data
       # Hot-reload: mount source code over the image
       - ./server:/app/server

@@ -214,7 +214,7 @@
 </template>
 
 <script setup>
-import { ref, computed, inject, watch } from 'vue';
+import { ref, computed, inject, watch, onUnmounted } from 'vue';
 import { getApiUrl } from '../../../utils/config';
 
 // ── Injected ───────────────────────────────────────────────────────────────────
@@ -247,8 +247,10 @@ const links = ref({ csvLinks: [], featureLinks: [] });
 // ── Autosave ───────────────────────────────────────────────────────────────────
 const saveState = ref('idle');
 const saveError = ref('');
-let saveTimer      = null;
-let loadingLinks   = false;
+let saveTimer        = null;
+let saveStateTimer   = null;
+let loadingLinks     = false;
+onUnmounted(() => { clearTimeout(saveTimer); clearTimeout(saveStateTimer); });
 
 function scheduleSave() {
   if (!selectedLayerId.value) return;
@@ -274,7 +276,7 @@ async function saveLinks() {
       throw new Error(body.error || `Save failed (${res.status})`);
     }
     saveState.value = 'saved';
-    setTimeout(() => { if (saveState.value === 'saved') saveState.value = 'idle'; }, 2500);
+    saveStateTimer = setTimeout(() => { if (saveState.value === 'saved') saveState.value = 'idle'; }, 2500);
   } catch (err) {
     saveState.value = 'error';
     saveError.value = err.message;

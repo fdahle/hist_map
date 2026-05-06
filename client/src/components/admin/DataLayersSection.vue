@@ -705,8 +705,12 @@ function onAssignmentsChanged(assignments) {
 }
 
 // ── Polling ─────────────────────────────────────────────────────
+let mounted = true;
+onUnmounted(() => { mounted = false; });
+
 function startPolling() {
   pollTimer = setInterval(async () => {
+    if (!mounted) return;
     if (!hasOptimizing.value && !uploadPlaceholders.value.length) return;
     await fetchLayers();
   }, 2000);

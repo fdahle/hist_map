@@ -132,23 +132,6 @@ export async function writeLayerMeta(layersDir, id, meta) {
   await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf8');
 }
 
-// Feature index lives in a separate sidecar so the main meta.json stays small
-// even for layers with tens of thousands of features.
-// Format: [{ id: string, index: number }, ...]
-export async function writeFeatureIndex(layersDir, id, index) {
-  const indexPath = resolveInDir(layersDir, id, `${id}.index.json`);
-  await fs.writeFile(indexPath, JSON.stringify(index), 'utf8');
-}
-
-export async function readFeatureIndex(layersDir, id) {
-  const indexPath = resolveInDir(layersDir, id, `${id}.index.json`);
-  try {
-    return JSON.parse(await fs.readFile(indexPath, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
 export async function listLayers(layersDir) {
   try {
     const entries = await fs.readdir(layersDir, { withFileTypes: true });

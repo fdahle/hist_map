@@ -108,6 +108,25 @@
                 </div>
               </div>
 
+              <div v-if="mode === 'map'" class="setting-row">
+                <div class="setting-info">
+                  <label for="restore-position-toggle">Restore Last Map Position</label>
+                  <p class="setting-desc">
+                    Remember your last map position and zoom level when you return to the map.
+                  </p>
+                </div>
+
+                <div class="toggle-switch">
+                  <input
+                    id="restore-position-toggle"
+                    type="checkbox"
+                    :checked="restoreMapPosition"
+                    @change="toggleRestoreMapPosition"
+                  />
+                  <label for="restore-position-toggle" class="slider"></label>
+                </div>
+              </div>
+
               <div v-if="bugReportMode === 'auto'" class="setting-row">
                 <div class="setting-info">
                   <label for="bug-report-toggle">Show Bug Report Button</label>
@@ -205,8 +224,8 @@ const goToAdmin = () => {
 };
 
 // Extract State (Must use storeToRefs to keep it reactive!)
-const { showInfoBar, showArrowButtons, showMapRibbon, showBugReportButton, theme, adminEnabled, viewer3dBackgroundColor } = storeToRefs(settingsStore);
-const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleBugReportButton, toggleTheme, setViewer3dBackgroundColor, resetViewer3dBackgroundColor } = settingsStore;
+const { showInfoBar, showArrowButtons, showMapRibbon, showBugReportButton, theme, adminEnabled, viewer3dBackgroundColor, restoreMapPosition } = storeToRefs(settingsStore);
+const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleBugReportButton, toggleTheme, setViewer3dBackgroundColor, resetViewer3dBackgroundColor, toggleRestoreMapPosition } = settingsStore;
 const bugReportMode = import.meta.env.VITE_BUG_REPORT || 'auto';
 
 const viewer3dBgPickerValue = computed(() =>

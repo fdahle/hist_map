@@ -37,27 +37,6 @@ Access development server:
 - **Frontend (dev)**: http://localhost:5173 (with hot reload)
 - **Backend API**: http://localhost:3000
 
-## Data Preprocessing
-
-Run preprocessing inside Docker container:
-
-```bash
-# Start the server container
-docker-compose up -d server
-
-# Run preprocessing
-docker-compose exec server node preprocess.js
-
-# View logs
-docker-compose exec server tail -f logs/preprocess.log
-```
-
-Or run as one-off command:
-
-```bash
-docker-compose run --rm server node preprocess.js
-```
-
 ## Commands
 
 ### Start Services
@@ -120,12 +99,6 @@ The Docker setup mounts these folders:
 
 ```
 stratum3D/
-├── input/                    # Mounted read-only to server
-│   ├── shapes/
-│   ├── models/
-│   ├── pointclouds/
-│   └── geotiffs/
-│
 ├── server/
 │   ├── data/                # Mounted read-write (persisted)
 │   │   ├── shapes/
@@ -253,12 +226,7 @@ docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
    docker-compose up --build
    ```
 
-2. **Run preprocessing**:
-   ```bash
-   docker-compose exec server node preprocess.js
-   ```
-
-3. **Access application**:
+2. **Access application**:
    - Open http://localhost:8080
 
 That's it! No GDAL, PDAL, or MeshLab installation needed! 🎉

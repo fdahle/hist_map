@@ -126,6 +126,7 @@
 import { ref, computed, watch } from 'vue';
 import { useLayerStore } from '@/stores/map/layerStore';
 import { useMapStore } from '@/stores/map/mapStore';
+import { isEmpty } from 'ol/extent';
 import { ICON_CLOSE } from '@/constants/icons.js';
 
 const ICON_SEARCH    = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
@@ -270,12 +271,10 @@ const zoomToFeature = (feature) => {
   if (!map || !feature) return;
   const geom = feature.getGeometry();
   if (!geom) return;
-  import('ol/extent').then(({ isEmpty }) => {
-    const extent = geom.getExtent();
-    if (!isEmpty(extent)) {
-      map.getView().fit(extent, { padding: [80, 80, 80, 80], duration: 600, maxZoom: 18 });
-    }
-  });
+  const extent = geom.getExtent();
+  if (!isEmpty(extent)) {
+    map.getView().fit(extent, { padding: [80, 80, 80, 80], duration: 600, maxZoom: 18 });
+  }
   emit('close');
 };
 </script>

@@ -37,7 +37,7 @@
 </template>
 
 <script setup>
-import { ref, computed, inject, onMounted } from "vue";
+import { ref, computed, inject } from "vue";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
 import { SEARCH_MIN_LENGTH, SEARCH_DEBOUNCE_MS } from "../../constants/layerConstants";
@@ -47,7 +47,6 @@ import { logger } from "../../utils/logger";
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
 const layerManager = inject("layerManager");
-const appConfig = inject("config");
 
 const placeholderText = computed(() => STRINGS.search.placeholder);
 

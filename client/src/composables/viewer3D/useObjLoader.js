@@ -180,7 +180,7 @@ export function useObjLoader({
       const manager = new THREE.LoadingManager();
       manager.setURLModifier((url) => {
         if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
-        const basename = url.split(/[\/\\]/).pop();
+        const basename = url.split(/[/\\]/).pop();
         return baseUrl + basename;
       });
 
@@ -238,7 +238,7 @@ export function useObjLoader({
 
       const manager = new THREE.LoadingManager();
       manager.setURLModifier((url) => {
-        const basename = url.split(/[\/\\]/).pop().toLowerCase();
+        const basename = url.split(/[/\\]/).pop().toLowerCase();
         return textureUrls[basename] ?? url;
       });
 

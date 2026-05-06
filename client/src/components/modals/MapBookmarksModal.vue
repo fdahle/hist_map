@@ -72,6 +72,7 @@
 <script setup>
 import { ref } from 'vue';
 import { useMapStore } from '@/stores/map/mapStore';
+import { transform } from 'ol/proj';
 import { ICON_CLOSE, ICON_TRASH, ICON_BOOKMARK_ADD } from '@/constants/icons';
 import { loadFromStorage, saveToStorage } from '@/utils/localStorage';
 import { useModalDrag } from '@/composables/useModalDrag';
@@ -111,7 +112,6 @@ const applyBookmark = async (bm) => {
   let center = bm.center;
   if (bm.projection && bm.projection !== currentProj) {
     try {
-      const { transform } = await import('ol/proj');
       center = transform(bm.center, bm.projection, currentProj);
     } catch { /* use as-is */ }
   }

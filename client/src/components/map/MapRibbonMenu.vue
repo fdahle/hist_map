@@ -490,8 +490,8 @@
 <script setup>
 import { ref, computed, watch, inject, onUnmounted } from 'vue';
 import { transform as olTransformCoord, get as olGetProjection } from 'ol/proj';
+import { createEmpty, extend, isEmpty } from 'ol/extent';
 import { storeToRefs } from 'pinia';
-import { useSettingsStore } from '@/stores/settingsStore';
 import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
 import { usePinStore } from '@/stores/map/pinStore';
@@ -502,7 +502,7 @@ import LayerInfoModal from '../modals/LayerInfoModal.vue';
 import ExportErrorModal from '../modals/ExportErrorModal.vue';
 import GeoJSON from 'ol/format/GeoJSON';
 
-const props = defineProps({
+defineProps({
   isMeasuringDistance: { type: Boolean, default: false },
   isMeasuringArea:     { type: Boolean, default: false },
   isElevationOpen:     { type: Boolean, default: false },
@@ -513,7 +513,6 @@ const props = defineProps({
 
 const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile', 'volume-calc', 'share-scene', 'extended-search', 'toggle-pins', 'toggle-bookmarks']);
 
-const settingsStore = useSettingsStore();
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
 const pinStore = usePinStore();
@@ -657,18 +656,16 @@ const fitAllLayers = () => {
     map.getView().animate({ zoom: 2, duration: 600 });
     return;
   }
-  import('ol/extent').then(({ createEmpty, extend, isEmpty }) => {
-    const combined = createEmpty();
-    for (const layer of overlays) {
-      const source = layer.layerInstance?.getSource?.();
-      if (!source) continue;
-      const ext = typeof source.getExtent === 'function' ? source.getExtent() : null;
-      if (ext && !isEmpty(ext)) extend(combined, ext);
-    }
-    if (!isEmpty(combined)) {
-      map.getView().fit(combined, { padding: [60, 60, 60, 60], duration: 800, maxZoom: 18 });
-    }
-  });
+  const combined = createEmpty();
+  for (const layer of overlays) {
+    const source = layer.layerInstance?.getSource?.();
+    if (!source) continue;
+    const ext = typeof source.getExtent === 'function' ? source.getExtent() : null;
+    if (ext && !isEmpty(ext)) extend(combined, ext);
+  }
+  if (!isEmpty(combined)) {
+    map.getView().fit(combined, { padding: [60, 60, 60, 60], duration: 800, maxZoom: 18 });
+  }
 };
 
 const zoomIn = () => {
@@ -793,7 +790,7 @@ const showLayerInfo = () => {
           rows.push({ key: 'Max X', value: ext[2].toFixed(2) });
           rows.push({ key: 'Max Y', value: ext[3].toFixed(2) });
         }
-      } catch (_) {}
+      } catch { /* non-fatal */ }
     }
   }
   // GeoTIFF extent is set by the worker and doesn't require a live layerInstance
@@ -829,7 +826,7 @@ const downloadLayer = async () => {
       a.download = `${layer.name}.tif`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
-    } catch (e) {
+    } catch {
       // Fallback: open in new tab
       window.open(layer.url, '_blank');
     }
@@ -901,7 +898,7 @@ const handleDocClick = (e) => {
 };
 
 watch(colormapDropdownOpen, (open) => {
-  if (open) setTimeout(() => document.addEventListener('click', handleDocClick), 0);
+  if (open) document.addEventListener('click', handleDocClick);
   else document.removeEventListener('click', handleDocClick);
 });
 
@@ -1011,12 +1008,12 @@ const handleColorByCmDocClick = (e) => {
 };
 
 watch(colorByPanelOpen, (open) => {
-  if (open) setTimeout(() => document.addEventListener('click', handleColorByDocClick), 0);
+  if (open) document.addEventListener('click', handleColorByDocClick);
   else document.removeEventListener('click', handleColorByDocClick);
 });
 
 watch(colorByCmOpen, (open) => {
-  if (open) setTimeout(() => document.addEventListener('click', handleColorByCmDocClick), 0);
+  if (open) document.addEventListener('click', handleColorByCmDocClick);
   else document.removeEventListener('click', handleColorByCmDocClick);
 });
 

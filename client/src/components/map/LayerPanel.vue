@@ -240,7 +240,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
 import LayerInfoModal from "../modals/LayerInfoModal.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
-import { ICON_POINT, ICON_LINE, ICON_POLYGON, ICON_RASTER, EMOJI_ICONS, getGeometryIcon, ICON_EYE, ICON_EYE_OFF, ICON_CHEVRON_DOWN, ICON_CHEVRON_RIGHT } from "../../constants/icons";
+import { getGeometryIcon, ICON_EYE, ICON_EYE_OFF, ICON_CHEVRON_DOWN, ICON_CHEVRON_RIGHT, EMOJI_ICONS } from "../../constants/icons";
 import { STRINGS } from "../../constants/strings";
 
 defineEmits(['open-settings']);
@@ -348,7 +348,7 @@ const handleMenuAction = ({ type, layer }) => {
             rows.push({ key: 'Max X', value: extent[2].toFixed(2) });
             rows.push({ key: 'Max Y', value: extent[3].toFixed(2) });
           }
-        } catch (_) {}
+        } catch { /* non-fatal */ }
       }
     }
     // GeoTIFF extent is set by the worker and doesn't require a live layerInstance
@@ -451,13 +451,6 @@ const handleColorChange = ({ color, layer, subGroupValue }) => {
 
 const handleCancel = (layerId) => {
   layerStore.cancelLayerLoad(layerId);
-};
-
-const handleRemove = (layerId) => {
-  const layer = layerStore.getLayerById(layerId);
-  const name = layer?.name || 'this layer';
-  if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
-  if (layerManager.value) layerManager.value.removeLayer(layerId);
 };
 
 // --- Sub-category expand/collapse ---
@@ -603,15 +596,13 @@ const handleTouchMove = (event) => {
     const layers = Array.from(layerList.querySelectorAll('.layer-row'));
     
     let targetLayer = null;
-    let targetLayerIndex = -1;
-    
+
     for (let i = 0; i < layers.length; i++) {
       const layer = layers[i];
       const rect = layer.getBoundingClientRect();
       if (touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
         targetLayer = layer;
-        targetLayerIndex = i;
-        
+
         // Calculate if touch is in top or bottom half
         const midpoint = rect.top + rect.height / 2;
         if (touch.clientY < midpoint) {

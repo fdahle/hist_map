@@ -259,8 +259,12 @@ async function fetchPdalAvailability() {
 }
 
 // ── Polling ────────────────────────────────────────────────────────────────────
+let mounted = true;
+onUnmounted(() => { mounted = false; });
+
 function startPolling() {
   pollTimer = setInterval(async () => {
+    if (!mounted) return;
     if (!hasOptimizing.value && !uploadPlaceholders.value.length) return;
     await fetchLayers();
   }, 2000);
@@ -268,12 +272,7 @@ function startPolling() {
 function stopPolling() { if (pollTimer) clearInterval(pollTimer); pollTimer = null; }
 
 // ── Upload flow ────────────────────────────────────────────────────────────────
-const pointcloudExts = new Set(['.las', '.laz']);
 const companionExts  = new Set(['.mtl', '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp']);
-
-function isPointcloud(filename) {
-  return pointcloudExts.has('.' + filename.split('.').pop().toLowerCase());
-}
 
 function onFilesSelected(e) {
   const files = Array.from(e.target.files);
@@ -418,7 +417,7 @@ async function saveEdit(id) {
     }
     const updated = await res.json();
     const idx = layers.value.findIndex(l => l.id === id);
-    if (idx !== -1) layers.value[idx] = updated;
+    if (idx !== -1) layers.value.splice(idx, 1, updated);
   } catch (err) {
     editError.value = err.message;
   } finally {

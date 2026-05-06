@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import Instance from '@giro3d/giro3d/core/Instance.js';
+import CoordinateSystem from '@giro3d/giro3d/core/geographic/CoordinateSystem.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -35,15 +37,6 @@ export function useSceneInit({ viewerRef, emit, onCanvasClick, onMouseDown, book
 
   const initViewer = async () => {
     if (!viewerRef.value) return;
-
-    // Dynamic import so non-viewer pages don't pay the bundle cost
-    const [
-      { default: Instance },
-      { default: CoordinateSystem },
-    ] = await Promise.all([
-      import('@giro3d/giro3d/core/Instance.js'),
-      import('@giro3d/giro3d/core/geographic/CoordinateSystem.js'),
-    ]);
 
     const instance = new Instance({
       target: viewerRef.value,

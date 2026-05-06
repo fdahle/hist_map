@@ -353,7 +353,7 @@ async function saveEdit(id) {
     }
     const updated = await res.json();
     const idx = layers.value.findIndex(l => l.id === id);
-    if (idx !== -1) layers.value[idx] = updated;
+    if (idx !== -1) layers.value.splice(idx, 1, updated);
   } catch (err) {
     editError.value = err.message;
   } finally {

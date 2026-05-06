@@ -1,6 +1,6 @@
 node_modules
 dist
-build
-*.md
-*.json
 .git
+*.log
+.env
+.env.*

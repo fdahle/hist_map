@@ -10,8 +10,6 @@ services:
       # For direct access without a reverse proxy, change to "3000:3000".
       - "127.0.0.1:3000:3000"
     volumes:
-      # Mount input folder for preprocessing
-      - ./input:/app/input:ro
       # Mount data folder to persist processed files
       - ./server/data:/app/server/data
     env_file:

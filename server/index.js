@@ -5,12 +5,11 @@
 import 'dotenv/config';   // loads server/.env before anything else
 import express from 'express';
 import path from 'path';
+import os from 'os';
 import fs from 'fs/promises';
-import { statfs as statfsCallback } from 'fs';
-import { promisify } from 'util';
+import { execFile } from 'child_process';
 import crypto from 'crypto';
 import cors from 'cors';
-const statfsAsync = promisify(statfsCallback);
 import compression from 'compression';
 import helmet from 'helmet';
 import yaml from 'js-yaml';
@@ -20,9 +19,10 @@ import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import config, { isDevelopment, isProduction } from './src/config.js';
 import logger from './src/logger.js';
-import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, readLinks, writeLinks, metaToConfigLayer, validateLayerId, resolveInDir, safeLayerExt } from './src/layerStore.js';
+import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, readLinks, writeLinks, validateLayerId, resolveInDir, safeLayerExt } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
 import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink, parseGeoFile, serializeGeoFile } from './processors/uploadProcessor.js';
+import { stampFeatureIds } from './processors/shapeProcessor.js';
 import { convertToCog, isGdalAvailable } from './processors/geotiffProcessor.js';
 import { convertToCopc, isPdalAvailable } from './processors/pointcloudProcessor.js';
 import { parse as csvParse } from 'csv-parse/sync';
@@ -247,16 +247,24 @@ app.post('/admin/set-password', authRateLimit, express.json(), async (req, res) 
   }
 });
 
-// Change admin password — requires current credentials, updates .credentials file
+// Change admin password — requires current credentials (header) + explicit old password in body
 app.post('/admin/change-password', authRateLimit, requireAdminAuth, express.json(), async (req, res) => {
-  const { newPassword } = req.body ?? {};
+  const { oldPassword, newPassword } = req.body ?? {};
+  if (!oldPassword || typeof oldPassword !== 'string') {
+    return res.status(400).json({ error: 'Current password is required.' });
+  }
   if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
     return res.status(400).json({ error: 'New password must be at least 8 characters.' });
   }
+  const hash = getAdminPassword();
+  const match = await bcrypt.compare(oldPassword, hash).catch(() => false);
+  if (!match) {
+    return res.status(403).json({ error: 'Current password is incorrect.' });
+  }
   try {
-    const hash = await bcrypt.hash(newPassword, 12);
-    await fs.writeFile(credentialsFilePath, hash, { mode: 0o600 });
-    runtimeAdminPassword = hash;
+    const newHash = await bcrypt.hash(newPassword, 12);
+    await fs.writeFile(credentialsFilePath, newHash, { mode: 0o600 });
+    runtimeAdminPassword = newHash;
     logger.info('Admin password changed');
     res.json({ success: true });
   } catch (err) {
@@ -408,8 +416,10 @@ app.delete('/config', requireAdminAuth, async (req, res) => {
 });
 
 // ── Data directory ───────────────────────────────────────────────────────────
-const dataDir   = path.join(__dirname, config.dataPath);
-const layersDir = path.join(dataDir, 'layers');
+const dataDir       = path.join(__dirname, config.dataPath);
+const layersDir     = path.join(dataDir, 'layers');
+const tmpUploadsDir = path.join(__dirname, 'tmp-uploads');
+await fs.mkdir(tmpUploadsDir, { recursive: true });
 
 // ── Multer setup ──────────────────────────────────────────────────────────────
 const ALLOWED_UPLOAD_EXTS = new Set(['.geojson', '.json', '.tif', '.tiff', '.obj', '.ply', '.stl',
@@ -417,7 +427,13 @@ const ALLOWED_UPLOAD_EXTS = new Set(['.geojson', '.json', '.tif', '.tiff', '.obj
 
 function makeUploadInstance() {
   return multer({
-    storage: multer.memoryStorage(),
+    storage: multer.diskStorage({
+      destination: (_req, _file, cb) => cb(null, tmpUploadsDir),
+      filename:    (_req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        cb(null, `${crypto.randomUUID()}${ext}`);
+      },
+    }),
     limits: { fileSize: config.uploadLimitMb * 1024 * 1024 },
     fileFilter: (_req, file, cb) => {
       const ext = path.extname(file.originalname).toLowerCase();
@@ -479,6 +495,33 @@ app.post('/admin/upload', requireAdminAuth, runUploadMiddleware, async (req, res
 
 // ── Layer CRUD ───────────────────────────────────────────────────────────────
 
+/**
+ * Cross-platform disk space helper.
+ * - Linux / macOS (including Docker on Mac): uses `df -B1`
+ * - Windows (native dev without Docker):    uses PowerShell Get-PSDrive
+ * Returns { free: number, total: number } in bytes.
+ */
+async function getDiskSpace(targetPath) {
+  if (os.platform() === 'win32') {
+    // Resolve the drive letter from the path (e.g. "C")
+    const drive = path.resolve(targetPath).split(path.sep)[0].replace(':', '');
+    const ps = `$d=(Get-PSDrive -Name '${drive}' -PSProvider FileSystem);` +
+               `Write-Output "$($d.Used+$d.Free) $($d.Free)"`;
+    const stdout = await new Promise((resolve, reject) =>
+      execFile('powershell', ['-NoProfile', '-Command', ps], (err, out) =>
+        err ? reject(err) : resolve(out)));
+    const [total, free] = stdout.trim().split(/\s+/).map(Number);
+    return { free, total };
+  }
+  // Linux / macOS
+  const stdout = await new Promise((resolve, reject) =>
+    execFile('df', ['-B1', targetPath], (err, out) =>
+      err ? reject(err) : resolve(out)));
+  // df output line: Filesystem  1B-blocks  Used  Available  Use%  Mounted
+  const parts = stdout.trim().split('\n')[1].trim().split(/\s+/);
+  return { total: parseInt(parts[1], 10), free: parseInt(parts[3], 10) };
+}
+
 // Storage info — total size of the data directory + upload limit
 app.get('/admin/storage', requireAdminAuth, async (req, res) => {
   async function dirSize(dir) {
@@ -508,10 +551,10 @@ app.get('/admin/storage', requireAdminAuth, async (req, res) => {
   let diskFreeBytes  = null;
   let diskTotalBytes = null;
   try {
-    const st = await statfsAsync(dataDir);
-    diskFreeBytes  = st.bavail * st.bsize;
-    diskTotalBytes = st.blocks * st.bsize;
-  } catch { /* statfs not available on this platform/Node version */ }
+    const { free, total } = await getDiskSpace(dataDir);
+    diskFreeBytes  = free;
+    diskTotalBytes = total;
+  } catch { /* disk info unavailable */ }
   res.json({ usedBytes, typeBytes, uploadLimitMb: config.uploadLimitMb, diskFreeBytes, diskTotalBytes });
 });
 
@@ -682,9 +725,19 @@ app.get('/admin/layers/:id/features', requireAdminAuth, async (req, res) => {
     if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Only GeoJSON layers have features.' });
     const filePath = resolveInDir(layersDir, req.params.id, `${req.params.id}${safeLayerExt(meta.extension)}`);
     const raw = await fs.readFile(filePath, 'utf8');
-    const geojson = JSON.parse(raw);
+    const { features: parsedFeatures, header } = parseGeoFile(raw, filePath);
+
+    // If any features are missing _featureId (e.g. layers created before stamping
+    // was introduced), stamp them now and write the file back so IDs are stable.
+    const needsStamp = (parsedFeatures ?? []).some(f => !f.properties?._featureId);
+    if (needsStamp) {
+      const fc = { type: 'FeatureCollection', features: parsedFeatures ?? [] };
+      stampFeatureIds(fc);
+      await fs.writeFile(filePath, serializeGeoFile(fc.features, header, filePath), 'utf8');
+    }
+
     const searchFields = meta.layerConfig?.search_fields ?? [];
-    const features = (geojson.features ?? []).map(f => {
+    const features = (parsedFeatures ?? []).map(f => {
       const props = f.properties ?? {};
       const id = props._featureId ?? null;
       let label = null;
@@ -851,47 +904,37 @@ app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, re
     meta.subFiles = meta.subFiles.filter(sf => !toDeleteIds.has(sf.id));
 
     // If the parent layer is GeoJSON and the deleted sub-file was a model/pointcloud,
-    // remove dangling references from feature properties
+    // remove dangling URL references from the links sidecar (GeoJSON is never modified).
     if (meta.fileType === 'geojson' && (subFile.role === 'model' || subFile.role === 'pointcloud')) {
       const urlToRemove = `data/layers/${id}/${subFile.id}${subFile.extension}`;
-      const geoExt  = safeLayerExt(meta.extension || '.geojson');
-      const geoPath = resolveInDir(layerDir, `${id}${geoExt}`);
       try {
-        const raw = await fs.readFile(geoPath, 'utf8');
-        const { features: parsedFeatures, header } = parseGeoFile(raw, geoPath);
-        let features = parsedFeatures;
-        let modified = false;
-        features = features.map(f => {
-          if (!f.properties) return f;
-          if (subFile.role === 'model' && Array.isArray(f.properties._model3dUrls)) {
-            const prev = f.properties._model3dUrls.length;
-            f.properties._model3dUrls = f.properties._model3dUrls.filter(u => u !== urlToRemove);
-            if (f.properties._model3dUrls.length !== prev) modified = true;
+        const links = await readLinks(layersDir, id);
+        if (Array.isArray(links.featureUrls)) {
+          let modified = false;
+          for (const fu of links.featureUrls) {
+            if (subFile.role === 'model' && fu.modelUrls?.includes(urlToRemove)) {
+              const idx = fu.modelUrls.indexOf(urlToRemove);
+              fu.modelUrls.splice(idx, 1);
+              fu.modelNames?.splice(idx, 1);
+              modified = true;
+            }
+            if (subFile.role === 'pointcloud' && fu.pointcloudUrls?.includes(urlToRemove)) {
+              const idx = fu.pointcloudUrls.indexOf(urlToRemove);
+              fu.pointcloudUrls.splice(idx, 1);
+              fu.pointcloudNames?.splice(idx, 1);
+              modified = true;
+            }
           }
-          if (subFile.role === 'pointcloud' && Array.isArray(f.properties._pointcloudUrls)) {
-            const prev = f.properties._pointcloudUrls.length;
-            f.properties._pointcloudUrls = f.properties._pointcloudUrls.filter(u => u !== urlToRemove);
-            if (f.properties._pointcloudUrls.length !== prev) modified = true;
+          links.featureUrls = links.featureUrls.filter(
+            fu => (fu.modelUrls?.length ?? 0) > 0 || (fu.pointcloudUrls?.length ?? 0) > 0
+          );
+          if (modified) {
+            await writeLinks(layersDir, id, links);
+            meta.linkedModelCount      = new Set(links.featureUrls.flatMap(fu => fu.modelUrls ?? [])).size;
+            meta.linkedPointcloudCount = new Set(links.featureUrls.flatMap(fu => fu.pointcloudUrls ?? [])).size;
           }
-          return f;
-        });
-        if (modified) {
-          const md = header._metadata ?? {};
-          md.has3DModels    = features.some(f => f.properties?._model3dUrls?.length > 0);
-          md.hasPointClouds = features.some(f => f.properties?._pointcloudUrls?.length > 0);
-          header._metadata  = md;
-          await fs.writeFile(geoPath, serializeGeoFile(features, header, geoPath), 'utf8');
-          // Recompute linked counts so layer cards stay accurate
-          const linkedModelUrls = new Set();
-          const linkedPcUrls    = new Set();
-          for (const f of features) {
-            for (const u of f.properties?._model3dUrls    ?? []) linkedModelUrls.add(u);
-            for (const u of f.properties?._pointcloudUrls ?? []) linkedPcUrls.add(u);
-          }
-          meta.linkedModelCount      = linkedModelUrls.size;
-          meta.linkedPointcloudCount = linkedPcUrls.size;
         }
-      } catch { /* GeoJSON read/write failure is non-fatal */ }
+      } catch { /* links sidecar update is non-fatal */ }
     }
 
     await writeLayerMeta(layersDir, id, meta);
@@ -976,7 +1019,8 @@ app.get('/admin/jobs/layer/:id', requireAdminAuth, (req, res) => {
 
 // ── Feature-level linking for new-style layers ────────────────────────────────
 
-// Manually assign 3D sub-file assets to specific features by feature ID
+// Manually assign 3D sub-file assets to specific features by feature ID.
+// Writes to the links sidecar ({id}.links.json) — the GeoJSON is never modified.
 app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req, res) => {
   const { id } = req.params;
   const { assignments } = req.body ?? {};
@@ -1006,56 +1050,30 @@ app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req,
       }
     }
 
-    const ext = safeLayerExt(meta.extension || '.geojson');
-    const filePath = resolveInDir(layersDir, id, `${id}${ext}`);
-    const raw = await fs.readFile(filePath, 'utf8');
-    const { features, header } = parseGeoFile(raw, filePath);
-
-    let linkedCount = 0;
-    let hasModels = false;
-    let hasPcs = false;
-
-    // Build a sub-file ID → original name lookup for human-readable names
+    // Build sub-file ID → display name lookup
     const subFileNameMap = new Map((meta.subFiles ?? []).map(sf => [sf.id, path.parse(sf.originalName).name]));
 
-    const updated = features.map((feature) => {
-      if (!feature.properties) feature.properties = {};
-      const fid = feature.properties._featureId;
-      if (fid && Object.prototype.hasOwnProperty.call(assignments, fid)) {
-        const assign = assignments[fid];
-        feature.properties._model3dUrls    = Array.isArray(assign.models)      ? assign.models      : [];
-        feature.properties._pointcloudUrls = Array.isArray(assign.pointclouds) ? assign.pointclouds : [];
-
-        // Resolve human-readable names from sub-file metadata
-        feature.properties._model3dNames    = feature.properties._model3dUrls.map(u => subFileNameMap.get(path.parse(u).name)).filter(Boolean);
-        feature.properties._pointcloudNames = feature.properties._pointcloudUrls.map(u => subFileNameMap.get(path.parse(u).name)).filter(Boolean);
-
-        if (feature.properties._model3dUrls.length > 0)    hasModels = true;
-        if (feature.properties._pointcloudUrls.length > 0) hasPcs    = true;
-        if (feature.properties._model3dUrls.length + feature.properties._pointcloudUrls.length > 0) {
-          linkedCount++;
-        }
+    // Convert assignments → featureUrls entries and write to links sidecar
+    let linkedCount = 0;
+    const featureUrls = [];
+    for (const [featureId, assign] of Object.entries(assignments)) {
+      const modelUrls       = Array.isArray(assign.models)      ? assign.models      : [];
+      const pointcloudUrls  = Array.isArray(assign.pointclouds) ? assign.pointclouds : [];
+      const modelNames      = modelUrls.map(u => subFileNameMap.get(path.parse(u).name)).filter(Boolean);
+      const pointcloudNames = pointcloudUrls.map(u => subFileNameMap.get(path.parse(u).name)).filter(Boolean);
+      if (modelUrls.length || pointcloudUrls.length) {
+        featureUrls.push({ featureId, modelUrls, pointcloudUrls, modelNames, pointcloudNames });
+        linkedCount++;
       }
-      return feature;
-    });
-
-    // Keep metadata in sync so the client can detect 3D capability on reload
-    const md = header._metadata ?? {};
-    md.has3DModels    = hasModels;
-    md.hasPointClouds = hasPcs;
-    header._metadata  = md;
-
-    await fs.writeFile(filePath, serializeGeoFile(updated, header, filePath), 'utf8');
-
-    // Store per-asset-type linked counts in meta.json so layer cards can show unlinked counts
-    const linkedModelUrls = new Set();
-    const linkedPcUrls    = new Set();
-    for (const f of updated) {
-      for (const u of f.properties?._model3dUrls    ?? []) linkedModelUrls.add(u);
-      for (const u of f.properties?._pointcloudUrls ?? []) linkedPcUrls.add(u);
     }
-    meta.linkedModelCount       = linkedModelUrls.size;
-    meta.linkedPointcloudCount  = linkedPcUrls.size;
+
+    const links = await readLinks(layersDir, id);
+    links.featureUrls = featureUrls;
+    await writeLinks(layersDir, id, links);
+
+    // Update linked counts in meta so layer cards can show them
+    meta.linkedModelCount      = new Set(featureUrls.flatMap(fu => fu.modelUrls)).size;
+    meta.linkedPointcloudCount = new Set(featureUrls.flatMap(fu => fu.pointcloudUrls)).size;
     await writeLayerMeta(layersDir, id, meta);
 
     logger.info(`Layer link: ${id} — ${linkedCount} feature(s) with assets`);

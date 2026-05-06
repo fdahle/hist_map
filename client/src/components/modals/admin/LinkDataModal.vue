@@ -173,10 +173,12 @@ const emit = defineEmits(['close', 'link-changed']);
 
 // ── State ──────────────────────────────────────────────────────
 
-const loading     = ref(false);
-const loadError   = ref('');
-const uploading   = ref(false);
-const uploadError = ref('');
+const loading      = ref(false);
+const loadError    = ref('');
+const uploading    = ref(false);
+const uploadError  = ref('');
+const saveError    = ref('');
+const saveSuccess  = ref('');
 const deleting    = ref('');
 
 const layerDisplayName  = ref('');

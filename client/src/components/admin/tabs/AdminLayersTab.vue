@@ -410,8 +410,12 @@ function metaToEntry(meta) {
 }
 
 // ── Polling ────────────────────────────────────────────────────────────────────
+let mounted = true;
+onUnmounted(() => { mounted = false; });
+
 function startPolling() {
   pollTimer = setInterval(async () => {
+    if (!mounted) return;
     if (!hasOptimizing.value && !uploadPlaceholders.value.length) return;
     await fetchLayers();
   }, 2000);
@@ -606,7 +610,7 @@ async function saveEdit(id) {
     }
     const updated = await res.json();
     const idx = layers.value.findIndex(l => l.id === id);
-    if (idx !== -1) layers.value[idx] = updated;
+    if (idx !== -1) layers.value.splice(idx, 1, updated);
     syncDraftDataLayers();
   } catch (err) {
     editError.value = err.message;

@@ -126,7 +126,7 @@ const props = defineProps({
   isPinsOpen: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(["action"]);
+defineEmits(["action"]);
 
 const pinStore = usePinStore();
 const pinLabelMode = ref(false);
@@ -325,11 +325,6 @@ const handleInspectPoint = async () => {
   isInspecting.value = false;
 };
 
-const formatValue = (v) => {
-  if (v === null || v === undefined) return '—';
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
-};
 
 defineExpose({ open, close });
 </script>

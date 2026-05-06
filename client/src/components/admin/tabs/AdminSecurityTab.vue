@@ -36,6 +36,11 @@
       <h3 class="card-title">Admin Password</h3>
       <form class="password-form" @submit.prevent="changePassword">
         <div class="field">
+          <label for="old-pw">Current password</label>
+          <input id="old-pw" v-model="oldPassword" type="password" autocomplete="current-password"
+            placeholder="Current password" :disabled="pwSaving" />
+        </div>
+        <div class="field">
           <label for="new-pw">New password <span class="field-hint-inline">(min 8 characters)</span></label>
           <input id="new-pw" v-model="newPassword" type="password" autocomplete="new-password"
             placeholder="New password" :disabled="pwSaving" />
@@ -48,7 +53,7 @@
         <p v-if="pwError" class="form-error">{{ pwError }}</p>
         <p v-if="pwSuccess" class="form-success">{{ pwSuccess }}</p>
         <div class="form-actions">
-          <button type="submit" class="btn-primary-sm" :disabled="pwSaving || !newPassword || !confirmPassword">
+          <button type="submit" class="btn-primary-sm" :disabled="pwSaving || !oldPassword || !newPassword || !confirmPassword">
             {{ pwSaving ? 'Saving…' : 'Change Password' }}
           </button>
         </div>
@@ -134,13 +139,11 @@
 </template>
 
 <script setup>
-import { ref, inject, onMounted } from 'vue';
+import { ref, inject, onMounted, onUnmounted } from 'vue';
 import { getApiUrl } from '../../../utils/config';
 
 // ── Injected from AdminView ────────────────────────────────────────────────────
 const authHeader      = inject('authHeader');
-const getStoredPassword = inject('getStoredPassword');
-const buildAuthHeader = inject('buildAuthHeader');
 const draft           = inject('draft');
 const scheduleSave    = inject('scheduleSave');
 const storePassword   = inject('storePassword');
@@ -151,6 +154,9 @@ const userPassword    = ref('');
 const userPwSaving    = ref(false);
 const userPwError     = ref('');
 const userPwSuccess   = ref('');
+let userPwSuccessTimer = null;
+let pwSuccessTimer = null;
+onUnmounted(() => { clearTimeout(userPwSuccessTimer); clearTimeout(pwSuccessTimer); });
 
 onMounted(async () => {
   try {
@@ -180,7 +186,8 @@ async function setUserPassword() {
     hasUserPassword.value = true;
     userPassword.value = '';
     userPwSuccess.value = 'Password enabled.';
-    setTimeout(() => { userPwSuccess.value = ''; }, 4000);
+    clearTimeout(userPwSuccessTimer);
+    userPwSuccessTimer = setTimeout(() => { userPwSuccess.value = ''; }, 4000);
   } catch (err) {
     userPwError.value = err.message;
   } finally {
@@ -202,7 +209,8 @@ async function clearUserPassword() {
     }
     hasUserPassword.value = false;
     userPwSuccess.value = 'Password removed.';
-    setTimeout(() => { userPwSuccess.value = ''; }, 4000);
+    clearTimeout(userPwSuccessTimer);
+    userPwSuccessTimer = setTimeout(() => { userPwSuccess.value = ''; }, 4000);
   } catch (err) {
     userPwError.value = err.message;
   } finally {
@@ -211,6 +219,7 @@ async function clearUserPassword() {
 }
 
 // ── Admin password change ──────────────────────────────────────────────────────
+const oldPassword     = ref('');
 const newPassword     = ref('');
 const confirmPassword = ref('');
 const pwSaving        = ref(false);
@@ -220,14 +229,15 @@ const pwSuccess       = ref('');
 async function changePassword() {
   pwError.value   = '';
   pwSuccess.value = '';
-  if (newPassword.value.length < 8) { pwError.value = 'Password must be at least 8 characters.'; return; }
+  if (!oldPassword.value) { pwError.value = 'Please enter your current password.'; return; }
+  if (newPassword.value.length < 8) { pwError.value = 'New password must be at least 8 characters.'; return; }
   if (newPassword.value !== confirmPassword.value) { pwError.value = 'Passwords do not match.'; return; }
   pwSaving.value = true;
   try {
     const res = await fetch(getApiUrl('/admin/change-password'), {
       method: 'POST',
       headers: { Authorization: authHeader.value, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ newPassword: newPassword.value }),
+      body: JSON.stringify({ oldPassword: oldPassword.value, newPassword: newPassword.value }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -235,10 +245,12 @@ async function changePassword() {
     }
     // Update the in-memory password so the session stays valid
     storePassword(newPassword.value);
+    oldPassword.value     = '';
     newPassword.value     = '';
     confirmPassword.value = '';
     pwSuccess.value = 'Password changed successfully.';
-    setTimeout(() => { pwSuccess.value = ''; }, 4000);
+    clearTimeout(pwSuccessTimer);
+    pwSuccessTimer = setTimeout(() => { pwSuccess.value = ''; }, 4000);
   } catch (err) {
     pwError.value = err.message;
   } finally {

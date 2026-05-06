@@ -13,11 +13,11 @@ export function useLoadingCancellation() {
   const cancelLoading = () => {
     loadingCancelled.value = true;
     for (const reader of activeReaders) {
-      try { reader.abort(); } catch (_) {}
+      try { reader.abort(); } catch { /* non-fatal */ }
     }
     activeReaders.clear();
     if (_activeStreamReader) {
-      try { _activeStreamReader.cancel(); } catch (_) {}
+      try { _activeStreamReader.cancel(); } catch { /* non-fatal */ }
       _activeStreamReader = null;
     }
     if (activeWorker.value) {

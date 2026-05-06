@@ -18,6 +18,20 @@ import {
   DEFAULT_COLOR,
 } from "../constants/layerConstants";
 
+function resolveUrlTemplate(template, feature) {
+  return template.replace(/\$<([^>]+)>/g, (_, expr) => {
+    const parts = expr.split(':');
+    const val = feature.get(parts[0]);
+    if (val == null) return '';
+    const str = String(val);
+    if (parts.length === 1) return str;
+    const start = parts[1] !== '' ? parseInt(parts[1], 10) : 0;
+    if (parts.length === 2) return str.slice(start);
+    const end = parts[2] !== '' ? parseInt(parts[2], 10) : undefined;
+    return str.slice(start, end);
+  });
+}
+
 export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
   const loadGeoJsonLayer = (layer) => {
     layerStore.setLayerStatus(layer._layerId, LAYER_STATUS.DOWNLOADING);
@@ -82,32 +96,12 @@ export function useGeoJsonLoader(map, layerStore, activeWorkers, searchIndex) {
           if (!feature.get("_featureId")) feature.set("_featureId", fid);
 
           if (!feature.get("_thumbnailUrl") && layer.thumbnailUrl) {
-            const resolved = layer.thumbnailUrl.replace(/\$<([^>]+)>/g, (_, expr) => {
-              const parts = expr.split(':');
-              const val = feature.get(parts[0]);
-              if (val == null) return '';
-              const str = String(val);
-              if (parts.length === 1) return str;
-              const start = parts[1] !== '' ? parseInt(parts[1], 10) : 0;
-              if (parts.length === 2) return str.slice(start);
-              const end = parts[2] !== '' ? parseInt(parts[2], 10) : undefined;
-              return str.slice(start, end);
-            });
+            const resolved = resolveUrlTemplate(layer.thumbnailUrl, feature);
             if (resolved) feature.set("_thumbnailUrl", resolved);
           }
 
           if (!feature.get("_downloadUrl") && layer.downloadUrl) {
-            const resolved = layer.downloadUrl.replace(/\$<([^>]+)>/g, (_, expr) => {
-              const parts = expr.split(':');
-              const val = feature.get(parts[0]);
-              if (val == null) return '';
-              const str = String(val);
-              if (parts.length === 1) return str;
-              const start = parts[1] !== '' ? parseInt(parts[1], 10) : 0;
-              if (parts.length === 2) return str.slice(start);
-              const end = parts[2] !== '' ? parseInt(parts[2], 10) : undefined;
-              return str.slice(start, end);
-            });
+            const resolved = resolveUrlTemplate(layer.downloadUrl, feature);
             if (resolved) feature.set("_downloadUrl", resolved);
           }
 
@@ -240,39 +234,62 @@ async function applyLinksToFeatures(layerId, source) {
   if (!linksRes.ok) return;
   const links = await linksRes.json();
   const featureLinks = links.featureLinks ?? [];
-  if (!featureLinks.length) return;
-
-  // Collect unique 3D layer IDs to resolve their file extensions
-  const allLayerIds = new Set();
-  for (const fl of featureLinks) {
-    (fl.modelLayerIds ?? []).forEach(id => allLayerIds.add(id));
-    (fl.pointcloudLayerIds ?? []).forEach(id => allLayerIds.add(id));
-  }
-  if (!allLayerIds.size) return;
-
-  // Fetch meta for each 3D layer (parallel), build id→{ url, name } map
-  const metaResults = await Promise.allSettled(
-    [...allLayerIds].map(async id => {
-      const res = await fetch(getApiUrl(`/layers/${id}/meta`));
-      if (!res.ok) return null;
-      const m = await res.json();
-      return { id, url: getApiUrl(`/data/layers/${id}/${id}${m.extension}`), name: m.name };
-    })
-  );
-  const urlMap = new Map();
-  for (const r of metaResults) {
-    if (r.status === 'fulfilled' && r.value) urlMap.set(r.value.id, r.value);
-  }
+  const featureUrls  = links.featureUrls  ?? [];
+  if (!featureLinks.length && !featureUrls.length) return;
 
   // Build featureId → { modelUrls, pcUrls, modelNames, pcNames } lookup
   const linkMap = new Map();
-  for (const fl of featureLinks) {
-    const modelUrls  = (fl.modelLayerIds ?? []).map(id => urlMap.get(id)?.url).filter(Boolean);
-    const pcUrls     = (fl.pointcloudLayerIds ?? []).map(id => urlMap.get(id)?.url).filter(Boolean);
-    const modelNames = (fl.modelLayerIds ?? []).map(id => urlMap.get(id)?.name).filter(Boolean);
-    const pcNames    = (fl.pointcloudLayerIds ?? []).map(id => urlMap.get(id)?.name).filter(Boolean);
-    if (modelUrls.length || pcUrls.length) linkMap.set(fl.featureId, { modelUrls, pcUrls, modelNames, pcNames });
+
+  // ── Standalone layer links (AdminLinkingTab) ───────────────────────────────
+  if (featureLinks.length) {
+    // Collect unique 3D layer IDs to resolve their file extensions
+    const allLayerIds = new Set();
+    for (const fl of featureLinks) {
+      (fl.modelLayerIds ?? []).forEach(id => allLayerIds.add(id));
+      (fl.pointcloudLayerIds ?? []).forEach(id => allLayerIds.add(id));
+    }
+
+    // Fetch meta for each 3D layer (parallel), build id→{ url, name } map
+    const metaResults = await Promise.allSettled(
+      [...allLayerIds].map(async id => {
+        const res = await fetch(getApiUrl(`/layers/${id}/meta`));
+        if (!res.ok) return null;
+        const m = await res.json();
+        return { id, url: getApiUrl(`/data/layers/${id}/${id}${m.extension}`), name: m.name };
+      })
+    );
+    const urlMap = new Map();
+    for (const r of metaResults) {
+      if (r.status === 'fulfilled' && r.value) urlMap.set(r.value.id, r.value);
+    }
+
+    for (const fl of featureLinks) {
+      const modelUrls  = (fl.modelLayerIds ?? []).map(id => urlMap.get(id)?.url).filter(Boolean);
+      const pcUrls     = (fl.pointcloudLayerIds ?? []).map(id => urlMap.get(id)?.url).filter(Boolean);
+      const modelNames = (fl.modelLayerIds ?? []).map(id => urlMap.get(id)?.name).filter(Boolean);
+      const pcNames    = (fl.pointcloudLayerIds ?? []).map(id => urlMap.get(id)?.name).filter(Boolean);
+      if (modelUrls.length || pcUrls.length) linkMap.set(fl.featureId, { modelUrls, pcUrls, modelNames, pcNames });
+    }
   }
+
+  // ── Sub-file URL links (LinkingModal / DataLayersSection) ─────────────────
+  for (const fu of featureUrls) {
+    const modelUrls  = (fu.modelUrls      ?? []).map(u => getApiUrl(`/${u}`));
+    const pcUrls     = (fu.pointcloudUrls ?? []).map(u => getApiUrl(`/${u}`));
+    const modelNames = fu.modelNames      ?? [];
+    const pcNames    = fu.pointcloudNames ?? [];
+    if (!modelUrls.length && !pcUrls.length) continue;
+    const existing = linkMap.get(fu.featureId);
+    if (existing) {
+      existing.modelUrls.push(...modelUrls);
+      existing.pcUrls.push(...pcUrls);
+      existing.modelNames.push(...modelNames);
+      existing.pcNames.push(...pcNames);
+    } else {
+      linkMap.set(fu.featureId, { modelUrls, pcUrls, modelNames, pcNames });
+    }
+  }
+
   if (!linkMap.size) return;
 
   // Inject into OL features

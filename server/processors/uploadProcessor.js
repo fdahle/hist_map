@@ -16,6 +16,11 @@
  *
  * Per-file settings are passed from the client upload modal as a JSON field
  * keyed by original filename.
+ *
+ * Files arrive via multer diskStorage — each file has a .path (temp path) and
+ * .size rather than a .buffer. Large binary files (LAZ, TIF) are renamed into
+ * the layer directory without ever being loaded into Node.js memory, which
+ * prevents OOM-kills (exit 137) when uploading large point clouds.
  */
 import path   from 'path';
 import fs     from 'fs/promises';
@@ -31,11 +36,51 @@ import {
   createLayerMeta,
   createSubFileMeta,
   writeLayerMeta,
-  writeFeatureIndex,
   readLayerMeta,
   resolveInDir,
   safeLayerExt,
 } from '../src/layerStore.js';
+
+// ── Temp-file helpers ──────────────────────────────────────────────────────────
+// multer diskStorage writes each upload to a temp path; these helpers move or
+// clean up those files without loading them into Node.js memory.
+
+async function moveTemp(srcPath, destPath) {
+  try {
+    await fs.rename(srcPath, destPath);
+  } catch (err) {
+    if (err.code === 'EXDEV') {
+      // Cross-device link — fall back to copy + delete
+      await fs.copyFile(srcPath, destPath);
+      await fs.unlink(srcPath).catch(() => {});
+    } else throw err;
+  }
+}
+
+async function cleanupTemp(filePath) {
+  if (filePath) await fs.unlink(filePath).catch(() => {});
+}
+
+// Read only the first maxBytes bytes of a file (e.g. for header inspection).
+async function readFileHeader(filePath, maxBytes) {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const { size } = await handle.stat();
+    const len = Math.min(maxBytes, size);
+    const buf = Buffer.alloc(len);
+    await handle.read(buf, 0, len, 0);
+    return buf;
+  } finally {
+    await handle.close();
+  }
+}
+
+// Read a Buffer from a fileMap value, which may be a path (string) or a Buffer.
+async function readMapEntry(val) {
+  if (!val) return null;
+  if (Buffer.isBuffer(val)) return val;
+  return fs.readFile(val);
+}
 
 // ── File-type helpers ──────────────────────────────────────────────────────────
 
@@ -120,6 +165,7 @@ export function parseGeoFile(raw, filePath) {
     }).filter(Boolean);
     return { features, header };
   }
+  // .geojson and .json are both standard GeoJSON
   const { features = [], ...rest } = JSON.parse(raw);
   return { features, header: rest };
 }
@@ -141,23 +187,32 @@ export function serializeGeoFile(features, header, filePath) {
  * Models and point clouds are no longer grouped as sub-files of a GeoJSON.
  * Linking is now managed separately via the links.json sidecar.
  *
- * @param {Array<{originalname:string,buffer:Buffer}>} files
+ * @param {Array<{originalname:string, path:string, size:number}>} files
  * @param {string} layersDir  — absolute path to data/layers/
  * @param {Object} allSettings — per-filename settings from the upload modal
  */
 export async function processUploadBatch(files, layersDir, allSettings = {}) {
   await fs.mkdir(layersDir, { recursive: true });
 
-  const fileMap = new Map(files.map(f => [f.originalname, f.buffer]));
+  // fileMap maps originalname → temp file path (or Buffer for legacy callers)
+  const fileMap = new Map();
+  for (const f of files) {
+    const val = f.path ?? f.buffer ?? null;
+    if (val != null) {
+      fileMap.set(f.originalname, val);
+      fileMap.set(normalizeFilename(f.originalname), val);
+    }
+  }
 
   const byType = { geojson: [], geotiff: [], model: [], pointcloud: [], companion: [], csv: [] };
   for (const f of files) {
     if (isCompanion(f.originalname)) byType.companion.push(f);
     else {
       let kind = classifyExt(f.originalname);
-      // A PLY with no faces is a point cloud, not a mesh
+      // A PLY with no faces is a point cloud, not a mesh — read only the header
       if (kind === 'model' && path.extname(f.originalname).toLowerCase() === '.ply') {
-        const { faces } = countModelElements(f.buffer, '.ply');
+        const headerBuf = f.buffer ?? await readFileHeader(f.path, 4096);
+        const { faces } = countModelElements(headerBuf, '.ply');
         if (faces === null || faces === 0) kind = 'pointcloud';
       }
       if (kind !== 'unknown') byType[kind].push(f);
@@ -186,12 +241,16 @@ export async function processUploadBatch(files, layersDir, allSettings = {}) {
     results.push(await _processCsvDataLayer(csvFile, layersDir, allSettings));
   }
 
+  // Clean up any temp files that weren't renamed into their final location
+  // (renames silently succeed even if the file is already gone).
+  await Promise.all(files.map(f => cleanupTemp(f.path)));
+
   return results;
 }
 
 // ── GeoJSON layer ──────────────────────────────────────────────────────────────
 
-async function _processGeoJsonLayer(geoFile, fileMap, layersDir, allSettings) {
+async function _processGeoJsonLayer(geoFile, _fileMap, layersDir, allSettings) {
   const id       = uuidv4();
   const layerDir = path.join(layersDir, id);
   await fs.mkdir(layerDir, { recursive: true });
@@ -201,7 +260,10 @@ async function _processGeoJsonLayer(geoFile, fileMap, layersDir, allSettings) {
 
   let geojson;
   try {
-    geojson = JSON.parse(geoFile.buffer.toString('utf8'));
+    const raw = geoFile.buffer
+      ? geoFile.buffer.toString('utf8')
+      : await fs.readFile(geoFile.path, 'utf8');
+    geojson = JSON.parse(raw);
   } catch {
     throw new Error(`${geoFile.originalname} is not valid JSON.`);
   }
@@ -219,7 +281,11 @@ async function _processGeoJsonLayer(geoFile, fileMap, layersDir, allSettings) {
 
   if (settings.keepOriginal) {
     const backupName = `original_${id}.geojson`;
-    await fs.writeFile(path.join(layerDir, backupName), geoFile.buffer);
+    if (geoFile.buffer) {
+      await fs.writeFile(path.join(layerDir, backupName), geoFile.buffer);
+    } else {
+      await fs.copyFile(geoFile.path, path.join(layerDir, backupName));
+    }
     meta.originalBackup = backupName;
   }
 
@@ -264,10 +330,6 @@ async function _processGeoJsonLayer(geoFile, fileMap, layersDir, allSettings) {
 
   await writeLayerMeta(layersDir, id, meta);
 
-  // Feature index is written to a separate sidecar to keep meta.json small.
-  const featureIndex = features.map((f, i) => ({ id: f.properties?._featureId ?? null, index: i }));
-  await writeFeatureIndex(layersDir, id, featureIndex);
-
   return {
     id,
     type:         'geojson',
@@ -293,28 +355,31 @@ async function _saveModelSubFile(modelFile, fileMap, parentLayerId, layerDir) {
 
   if (ext === '.obj') {
     const mtlOrigName = path.parse(modelFile.originalname).name + '.mtl';
-    const mtlBuf      = fileMap.get(mtlOrigName) ?? fileMap.get(normalizeFilename(mtlOrigName));
+    const mtlRef      = fileMap.get(mtlOrigName) ?? fileMap.get(normalizeFilename(mtlOrigName));
 
-    if (mtlBuf) {
+    if (mtlRef) {
+      const mtlBuf   = await readMapEntry(mtlRef);
       const mtlSubId = uuidv4();
       const mtlFile  = `${mtlSubId}.mtl`;
 
-      // mtllib is always near the top — only stringify the first 8 KB to patch it
-      const SCAN = Math.min(8192, modelFile.buffer.length);
-      let header = modelFile.buffer.slice(0, SCAN).toString('utf8');
+      // mtllib is always near the top — only patch the first 8 KB then concat the rest
+      const modelBuf = modelFile.buffer ?? await fs.readFile(modelFile.path);
+      const SCAN = Math.min(8192, modelBuf.length);
+      let header = modelBuf.slice(0, SCAN).toString('utf8');
       header = header.replace(/^mtllib\s+.+$/m, `mtllib ${mtlFile}`);
-      const objBuf = Buffer.concat([Buffer.from(header, 'utf8'), modelFile.buffer.slice(SCAN)]);
+      const objBuf = Buffer.concat([Buffer.from(header, 'utf8'), modelBuf.slice(SCAN)]);
 
       const textureRefs = extractTextureRefs(mtlBuf.toString('utf8'));
       let mtlContent    = mtlBuf.toString('utf8');
       const texMeta     = [];
 
       for (const texRef of textureRefs) {
-        const texBuf = fileMap.get(texRef) ?? fileMap.get(normalizeFilename(texRef));
-        if (texBuf) {
+        const texRef2 = fileMap.get(texRef) ?? fileMap.get(normalizeFilename(texRef));
+        if (texRef2) {
           const texExt   = path.extname(texRef).toLowerCase();
           const texSubId = uuidv4();
           const texFile  = `${texSubId}${texExt}`;
+          const texBuf   = await readMapEntry(texRef2);
           await fs.writeFile(path.join(layerDir, texFile), texBuf);
           mtlContent = mtlContent.replace(
             new RegExp(texRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), texFile
@@ -330,10 +395,14 @@ async function _saveModelSubFile(modelFile, fileMap, parentLayerId, layerDir) {
       ];
       await fs.writeFile(path.join(layerDir, outFile), objBuf);
     } else {
-      await fs.writeFile(path.join(layerDir, outFile), modelFile.buffer);
+      // No MTL companion — rename the temp file directly
+      if (modelFile.path) await moveTemp(modelFile.path, path.join(layerDir, outFile));
+      else await fs.writeFile(path.join(layerDir, outFile), modelFile.buffer);
     }
   } else {
-    await fs.writeFile(path.join(layerDir, outFile), modelFile.buffer);
+    // PLY / STL — no patching needed, rename directly
+    if (modelFile.path) await moveTemp(modelFile.path, path.join(layerDir, outFile));
+    else await fs.writeFile(path.join(layerDir, outFile), modelFile.buffer);
   }
 
   return { subMeta, url };
@@ -358,10 +427,14 @@ async function _processStandaloneModel(modelFile, fileMap, layersDir, allSetting
   await fs.rename(tmpFile, path.join(layerDir, outFile)).catch(() => {});
   if (subRes.subMeta.companions) meta.subFiles.push(...subRes.subMeta.companions);
 
-  meta.fileSizeBytes = modelFile.buffer.length;
-  const { vertices: vertexCount, faces: faceCount } = countModelElements(modelFile.buffer, ext);
-  if (vertexCount != null) meta.vertexCount = vertexCount;
-  if (faceCount   != null) meta.faceCount   = faceCount;
+  meta.fileSizeBytes = modelFile.size ?? modelFile.buffer?.length ?? 0;
+  // Read the final output file to count vertices/faces for metadata
+  const modelBuf = await fs.readFile(path.join(layerDir, outFile)).catch(() => null);
+  if (modelBuf) {
+    const { vertices: vertexCount, faces: faceCount } = countModelElements(modelBuf, ext);
+    if (vertexCount != null) meta.vertexCount = vertexCount;
+    if (faceCount   != null) meta.faceCount   = faceCount;
+  }
   meta.processingLog = [`Saved as ${ext.replace('.', '').toUpperCase()} model.`];
   await writeLayerMeta(layersDir, id, meta);
 
@@ -388,12 +461,24 @@ async function _processStandalonePointcloud(pcFile, layersDir, allSettings) {
 
   const ext      = pointcloudExt(pcFile.originalname);
   const mainFile = `${id}${ext}`;
-  await fs.writeFile(path.join(layerDir, mainFile), pcFile.buffer);
+  const mainPath = path.join(layerDir, mainFile);
 
-  if (settings.keepOriginal) {
-    const backupName = `original_${id}${ext}`;
-    await fs.writeFile(path.join(layerDir, backupName), pcFile.buffer);
-    meta.originalBackup = backupName;
+  // Move the temp file into its final location without loading it into memory
+  if (pcFile.path) {
+    if (settings.keepOriginal) {
+      const backupName = `original_${id}${ext}`;
+      await fs.copyFile(pcFile.path, path.join(layerDir, backupName));
+      meta.originalBackup = backupName;
+    }
+    await moveTemp(pcFile.path, mainPath);
+  } else {
+    // Legacy in-memory buffer path (shouldn't occur with diskStorage)
+    await fs.writeFile(mainPath, pcFile.buffer);
+    if (settings.keepOriginal) {
+      const backupName = `original_${id}${ext}`;
+      await fs.writeFile(path.join(layerDir, backupName), pcFile.buffer);
+      meta.originalBackup = backupName;
+    }
   }
 
   const isCOPC = ext.endsWith('.copc.laz');
@@ -401,14 +486,14 @@ async function _processStandalonePointcloud(pcFile, layersDir, allSettings) {
   const extLabel = ext.replace(/^\./, '').toUpperCase();
   const step = `Saved as ${extLabel} point cloud.`;
 
-  meta.fileSizeBytes = pcFile.buffer.length;
-  if (wantsCOPC && !isCOPC) meta.originalSizeBytes = pcFile.buffer.length;
+  meta.fileSizeBytes = pcFile.size ?? pcFile.buffer?.length ?? 0;
+  if (wantsCOPC && !isCOPC) meta.originalSizeBytes = meta.fileSizeBytes;
   meta.processingLog = [step];
   meta.status        = wantsCOPC && !isCOPC ? 'optimizing' : 'ready';
   if (wantsCOPC && !isCOPC) meta.optimizationType = 'copc';
 
   // Extract point count and bbox from the file header (requires PDAL).
-  const pcInfo = await extractPointCloudInfo(path.join(layerDir, mainFile));
+  const pcInfo = await extractPointCloudInfo(mainPath);
   if (pcInfo) {
     if (pcInfo.pointCount != null) meta.pointCount = pcInfo.pointCount;
     if (pcInfo.bbox)               meta.bbox       = pcInfo.bbox;
@@ -440,12 +525,23 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
 
   const ext      = path.extname(tifFile.originalname).toLowerCase() || '.tif';
   const mainFile = `${id}${ext}`;
-  await fs.writeFile(path.join(layerDir, mainFile), tifFile.buffer);
+  const mainPath = path.join(layerDir, mainFile);
 
-  if (settings.keepOriginal) {
-    const backupName = `original_${id}${ext}`;
-    await fs.writeFile(path.join(layerDir, backupName), tifFile.buffer);
-    meta.originalBackup = backupName;
+  // Move the temp file into its final location without loading it into memory
+  if (tifFile.path) {
+    if (settings.keepOriginal) {
+      const backupName = `original_${id}${ext}`;
+      await fs.copyFile(tifFile.path, path.join(layerDir, backupName));
+      meta.originalBackup = backupName;
+    }
+    await moveTemp(tifFile.path, mainPath);
+  } else {
+    await fs.writeFile(mainPath, tifFile.buffer);
+    if (settings.keepOriginal) {
+      const backupName = `original_${id}${ext}`;
+      await fs.writeFile(path.join(layerDir, backupName), tifFile.buffer);
+      meta.originalBackup = backupName;
+    }
   }
 
   const wantsCOG = settings.optimize === 'cog';
@@ -460,19 +556,13 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
   }
   if (settings.keepOriginal) meta.keepOriginal = true;
 
-  // Extract CRS and raster info from the file using GDAL (if available).
-  // This populates sourceCrs in the meta and tiffProjection in layerConfig
-  // so the client can pre-register the projection before rendering.
-  meta.fileSizeBytes = tifFile.buffer.length;
-  if (wantsCOG) meta.originalSizeBytes = tifFile.buffer.length;
+  meta.fileSizeBytes = tifFile.size ?? tifFile.buffer?.length ?? 0;
+  if (wantsCOG) meta.originalSizeBytes = meta.fileSizeBytes;
 
-  const mainFilePath = path.join(layerDir, mainFile);
-  const gdalInfo = await extractGeoTiffInfo(mainFilePath);
+  const gdalInfo = await extractGeoTiffInfo(mainPath);
   if (gdalInfo?.crs) {
     meta.sourceCrs = gdalInfo.crs;
     meta.layerConfig.tiffProjection = gdalInfo.crs;
-    // Look up the proj4 string so the client can register the CRS without
-    // a network round-trip to epsg.io.
     const epsgNum = gdalInfo.crs.split(':')[1];
     const proj4Str = epsg[epsgNum]?.proj4 ?? null;
     if (proj4Str) meta.layerConfig.tiffProj4 = proj4Str;
@@ -521,9 +611,17 @@ async function _processCsvDataLayer(csvFile, layersDir, allSettings) {
   const meta     = createLayerMeta({ id, originalName: csvFile.originalname, fileType: 'csv', options: settings });
   meta.extension = '.csv';
 
-  await fs.writeFile(path.join(layerDir, `${id}.csv`), csvFile.buffer);
+  const destPath = path.join(layerDir, `${id}.csv`);
+  if (csvFile.path) {
+    await moveTemp(csvFile.path, destPath);
+  } else {
+    await fs.writeFile(destPath, csvFile.buffer);
+  }
 
-  const text = csvFile.buffer.toString('utf8');
+  const text = csvFile.buffer
+    ? csvFile.buffer.toString('utf8')
+    : await fs.readFile(destPath, 'utf8');
+
   const firstNewline = text.indexOf('\n');
   const headerLine   = firstNewline !== -1 ? text.slice(0, firstNewline).trim() : text.trim();
   const delimiter    = detectCsvDelimiter(headerLine);
@@ -532,7 +630,7 @@ async function _processCsvDataLayer(csvFile, layersDir, allSettings) {
     if (records.length > 0) meta.csvColumns = Object.keys(records[0]);
   } catch { /* non-fatal — columns will be detected on demand */ }
 
-  meta.fileSizeBytes = csvFile.buffer.length;
+  meta.fileSizeBytes = csvFile.size ?? csvFile.buffer?.length ?? 0;
   meta.csvDelimiter  = delimiter;
   meta.rowCount      = Math.max(0, text.split('\n').filter(l => l.trim()).length - 1);
   meta.processingLog = ['Saved as CSV.'];
@@ -558,7 +656,12 @@ export async function addSubFile(layerId, file, role, layersDir, settings = {}) 
   const origExt  = path.extname(file.originalname).toLowerCase() || '';
   const rawFile  = `${subId}${origExt}`;
   const rawPath  = resolveInDir(layerDir, rawFile);
-  await fs.writeFile(rawPath, file.buffer);
+
+  if (file.path) {
+    await moveTemp(file.path, rawPath);
+  } else {
+    await fs.writeFile(rawPath, file.buffer);
+  }
 
   let finalExt = origExt;
   let conversionNote = null;
@@ -608,11 +711,14 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
   const meta     = await readLayerMeta(layersDir, layerId);
   const layerDir = resolveInDir(layersDir, layerId);
 
-  // Build fileMap so _saveModelSubFile can find companion MTL / textures
+  // fileMap maps originalname → temp file path (or Buffer for legacy callers)
   const fileMap = new Map();
   for (const f of files) {
-    fileMap.set(f.originalname, f.buffer);
-    fileMap.set(normalizeFilename(f.originalname), f.buffer);
+    const val = f.path ?? f.buffer ?? null;
+    if (val != null) {
+      fileMap.set(f.originalname, val);
+      fileMap.set(normalizeFilename(f.originalname), val);
+    }
   }
 
   // Track which original filenames were consumed as companions so we don't double-add them
@@ -624,7 +730,8 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
     if (classifyExt(file.originalname) !== 'model') continue;
     // Vertex-only PLY → point cloud, handled in step 2
     if (path.extname(file.originalname).toLowerCase() === '.ply') {
-      const { faces } = countModelElements(file.buffer, '.ply');
+      const headerBuf = file.buffer ?? await readFileHeader(file.path, 4096);
+      const { faces } = countModelElements(headerBuf, '.ply');
       if (faces === null || faces === 0) continue;
     }
     const subRes = await _saveModelSubFile(file, fileMap, layerId, layerDir);
@@ -647,7 +754,8 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
     if (consumedNames.has(file.originalname) || consumedNames.has(normalizeFilename(file.originalname))) continue;
     const fileKind = classifyExt(file.originalname);
     if (fileKind === 'model' && path.extname(file.originalname).toLowerCase() === '.ply') {
-      const { faces } = countModelElements(file.buffer, '.ply');
+      const headerBuf = file.buffer ?? await readFileHeader(file.path, 4096);
+      const { faces } = countModelElements(headerBuf, '.ply');
       if (faces !== null && faces > 0) continue; // mesh PLY — skip, already handled above
     } else if (fileKind !== 'pointcloud') {
       continue;
@@ -655,11 +763,13 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
     const pcSettings = allSettings[file.originalname] ?? {};
     const subId = uuidv4();
     const ext   = pointcloudExt(file.originalname);
-    await fs.writeFile(path.join(layerDir, `${subId}${ext}`), file.buffer);
+    const pcDest = path.join(layerDir, `${subId}${ext}`);
+    if (file.path) await moveTemp(file.path, pcDest);
+    else await fs.writeFile(pcDest, file.buffer);
     let finalExt = ext;
     if (pcSettings.optimize === 'copc') {
       try {
-        const res = await convertToCopc(path.join(layerDir, `${subId}${ext}`), {
+        const res = await convertToCopc(pcDest, {
           keepOriginal: pcSettings.keepOriginal ?? false,
           sourceCrs:    pcSettings.sourceCrs    || null,
         });
@@ -680,7 +790,9 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
     const ext = path.extname(file.originalname).toLowerCase();
     const subId = uuidv4();
     const outFile = `${subId}${ext}`;
-    await fs.writeFile(path.join(layerDir, outFile), file.buffer);
+    const destPath = path.join(layerDir, outFile);
+    if (file.path) await moveTemp(file.path, destPath);
+    else await fs.writeFile(destPath, file.buffer);
     const role     = ext === '.mtl' ? 'material' : TEXTURE_EXTS.has(ext) ? 'texture' : 'unknown';
     const fileType = ext === '.mtl' ? 'material' : TEXTURE_EXTS.has(ext) ? 'texture' : 'unknown';
     const subMeta  = createSubFileMeta({ id: subId, originalName: file.originalname, fileType, role });
@@ -689,6 +801,10 @@ export async function addSubFileBatch(layerId, files, layersDir, allSettings = {
   }
 
   await writeLayerMeta(layersDir, layerId, meta);
+
+  // Clean up any temp files that weren't renamed (e.g. companion files read via fileMap)
+  await Promise.all(files.map(f => cleanupTemp(f.path)));
+
   return { subFiles: newSubFiles, meta };
 }
 
@@ -847,4 +963,3 @@ export async function applyCsvLink(layerId, layersDir, csvLink, oldJoinedCols = 
 
   return newCols;
 }
-

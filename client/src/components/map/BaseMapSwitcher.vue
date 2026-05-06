@@ -116,7 +116,12 @@ const debouncedUpdate = debounce(updatePreviews, 500);
 
 watch(
   map,
-  (newMap) => {
+  (newMap, oldMap) => {
+    if (oldMap) {
+      const oldView = oldMap.getView();
+      oldView.un("change:center", debouncedUpdate);
+      oldView.un("change:resolution", debouncedUpdate);
+    }
     if (newMap) {
       updatePreviews();
       const view = newMap.getView();

@@ -213,8 +213,6 @@ const emit = defineEmits(['close', 'assignments-changed']);
 
 const loading        = ref(false);
 const loadError      = ref('');
-const saveError      = ref('');
-const saveSuccess    = ref('');
 let _isInitialLoad   = false;
 
 const models      = ref([]);  // { filename, dataPath }
@@ -253,10 +251,6 @@ const hasAnyAssignment = computed(() =>
   Object.values(assignments.value).some(a => a.models.length || a.pointclouds.length)
 );
 
-// Total linked features (features that have at least one 3D asset assigned)
-const linkedFeatureCount = computed(() =>
-  Object.values(assignments.value).filter(a => a.models.length || a.pointclouds.length).length
-);
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -280,29 +274,6 @@ function urlToName(url) {
   const all = [...models.value, ...pointclouds.value];
   const found = all.find(a => a.dataPath === url);
   return found ? shortName(found.filename) : shortName(url.split('/').pop());
-}
-
-const SYSTEM_KEYS = new Set(['_featureId', '_model3dUrls', '_pointcloudUrls', '_layerId']);
-
-function buildFeatureMeta(feature) {
-  const props  = feature.properties ?? {};
-  const fid    = props._featureId ?? null;
-  const values = [];
-  let displayName = null;
-
-  for (const [k, v] of Object.entries(props)) {
-    if (SYSTEM_KEYS.has(k) || v === null || v === undefined || v === '') continue;
-    const s = String(v);
-    if (s.length > 0 && s.length < 100) {
-      if (!displayName) displayName = s;
-      else values.push(`${k}: ${s}`);
-      if (values.length >= 2) break;
-    }
-  }
-
-  if (!displayName) displayName = fid ? fid.slice(0, 12) + '…' : 'Feature';
-  const secondary = values.length ? values.join(' · ') : null;
-  return { featureId: fid, displayName, secondary };
 }
 
 // ── Drag & Drop ────────────────────────────────────────────────────────────────
@@ -354,25 +325,25 @@ watch(() => props.isOpen, async (open) => {
 async function loadData() {
   loading.value   = true;
   loadError.value = '';
-  saveError.value = '';
-  saveSuccess.value = '';
   _isInitialLoad = true;
   try {
-    const [assetsRes, geojsonRes, libsRes] = await Promise.all([
-      fetch(getApiUrl(`/admin/layers/${props.layerId}`), { headers: { Authorization: props.authHeader } }),
-      fetch(getApiUrl(`data/layers/${props.layerId}/${props.layerId}.geojson`)),
-      fetch(getApiUrl('/admin/system-libraries'), { headers: { Authorization: props.authHeader } }),
+    const [assetsRes, featuresRes, linksRes, libsRes] = await Promise.all([
+      fetch(getApiUrl(`/admin/layers/${props.layerId}`),          { headers: { Authorization: props.authHeader } }),
+      fetch(getApiUrl(`/admin/layers/${props.layerId}/features`), { headers: { Authorization: props.authHeader } }),
+      fetch(getApiUrl(`/admin/layers/${props.layerId}/links`),    { headers: { Authorization: props.authHeader } }),
+      fetch(getApiUrl('/admin/system-libraries'),                 { headers: { Authorization: props.authHeader } }),
     ]);
-    if (!assetsRes.ok) throw new Error(`Failed to load assets (${assetsRes.status})`);
-    if (!geojsonRes.ok) throw new Error(`Failed to load GeoJSON (${geojsonRes.status})`);
+    if (!assetsRes.ok)   throw new Error(`Failed to load assets (${assetsRes.status})`);
+    if (!featuresRes.ok) throw new Error(`Failed to load features (${featuresRes.status})`);
 
     if (libsRes.ok) {
       const libs = await libsRes.json();
       pdalAvailable.value = libs.find(l => l.name === 'PDAL')?.available ?? true;
     }
 
-    const layerMeta = await assetsRes.json();
-    const geojson   = await geojsonRes.json();
+    const layerMeta     = await assetsRes.json();
+    const { features: rawFeatures } = await featuresRes.json();
+    const linksData     = linksRes.ok ? await linksRes.json() : {};
 
     layerDisplayName.value = layerMeta.layerConfig?.displayName || layerMeta.originalName || '';
     const subFiles = layerMeta.subFiles ?? [];
@@ -391,21 +362,23 @@ async function loadData() {
         dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
       }));
 
-    const initial = {};
-    features.value = (geojson.features ?? [])
-      .map(f => {
-        const meta = buildFeatureMeta(f);
-        if (meta.featureId) {
-          initial[meta.featureId] = {
-            models:      Array.isArray(f.properties?._model3dUrls)    ? [...f.properties._model3dUrls]    : [],
-            pointclouds: Array.isArray(f.properties?._pointcloudUrls) ? [...f.properties._pointcloudUrls] : [],
-          };
-        }
-        return meta;
-      })
-      .filter(f => f.featureId);
+    // Features come from the /features endpoint (works for both .geojson and .geojsonl)
+    features.value = (rawFeatures ?? [])
+      .filter(f => f.id)
+      .map(f => ({ featureId: f.id, displayName: f.label ?? f.id.slice(0, 12) + '…', secondary: null }));
 
-    // Use pending assignments from parent if available, otherwise use GeoJSON state
+    // Initial assignments come from the links sidecar (featureUrls section)
+    const initial = {};
+    for (const fu of (linksData.featureUrls ?? [])) {
+      if (fu.featureId) {
+        initial[fu.featureId] = {
+          models:      fu.modelUrls      ?? [],
+          pointclouds: fu.pointcloudUrls ?? [],
+        };
+      }
+    }
+
+    // Use pending assignments from parent if available, otherwise use links state
     assignments.value = props.initialAssignments !== undefined
       ? { ...props.initialAssignments }
       : initial;

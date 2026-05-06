@@ -35,11 +35,9 @@
 import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import { useMapStore } from "../../stores/map/mapStore";
-import { useLayerStore } from "../../stores/map/layerStore";
 import { useSelectionStore } from "../../stores/map/selectionStore";
 
 const mapStore = useMapStore();
-const layerStore = useLayerStore();
 const selectionStore = useSelectionStore();
 const { zoom, projectedCoords, crsName } = storeToRefs(mapStore);
 
