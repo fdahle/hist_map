@@ -108,6 +108,15 @@
         </div>
         <input ref="mtlFileInputRef" type="file" multiple accept=".mtl,.jpg,.jpeg,.png,.bmp,.gif,.webp" style="display:none" @change="onMaterialFilePicked" />
         <BugReportButton />
+
+        <!-- Mobile: floating button to open layers panel -->
+        <button class="mobile-layers-fab" @click="layerManagerRef?.toggle()" title="Toggle layers panel">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+            <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+          <span>Layers</span>
+        </button>
       </div>
 
       <!-- Drag-and-drop overlay covering the full scene area -->
@@ -812,6 +821,42 @@ const handleStopLoading = () => {
   flex: 1;
   position: relative;
   overflow: hidden;
+}
+
+.mobile-layers-fab {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .mobile-layers-fab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    z-index: 900;
+    padding: 10px 16px;
+    background: #343a40;
+    color: #fff;
+    border: none;
+    border-radius: 24px;
+    font-size: 13px;
+    font-family: "Segoe UI", sans-serif;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.35);
+    transition: background 0.15s, box-shadow 0.15s;
+  }
+
+  .theme-light .mobile-layers-fab {
+    background: #4a5568;
+  }
+
+  .mobile-layers-fab:hover {
+    background: #4a5568;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  }
 }
 
 .drop-overlay {

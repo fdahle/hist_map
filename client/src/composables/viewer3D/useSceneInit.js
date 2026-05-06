@@ -72,7 +72,7 @@ export function useSceneInit({ viewerRef, emit, onCanvasClick, onMouseDown, book
     instance.scene.add(directionalLight);
 
     const gridHelper = new THREE.GridHelper(200, 20, 0x888888, 0x444444);
-    gridHelper.rotation.x = Math.PI / 2;
+    gridHelper.rotation.x = -Math.PI / 2;
     gridHelper.name = 'gridHelper';
     instance.scene.add(gridHelper);
 

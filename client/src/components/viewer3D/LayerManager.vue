@@ -1,7 +1,13 @@
 <template>
-  <div class="layer-panel">
+  <div :class="['layer-panel', { 'is-open': isOpen }]">
+    <!-- Mobile backdrop -->
+    <div class="layer-backdrop" @click="isOpen = false"></div>
+
     <div class="layer-header">
       <h4>Layers</h4>
+      <button class="layer-close-btn" @click="isOpen = false" title="Close panel" aria-label="Close layers panel">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
     </div>
     
     <div class="layer-list">
@@ -76,6 +82,11 @@ const emit = defineEmits(['toggle-layer-visibility', 'remove-layer', 'zoom-to-la
 const layers = ref([]);
 const selectedLayerId = ref(null);
 const contextMenuRef = ref(null);
+
+// Open by default on desktop, closed on mobile
+const isOpen = ref(typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
+
+const toggle = () => { isOpen.value = !isOpen.value; };
 
 // Info modal state
 const infoModalVisible = ref(false);
@@ -288,6 +299,7 @@ const setPointSizeById = (layerId, size) => {
 };
 
 defineExpose({
+  toggle,
   addLayer,
   openInfoForLayer,
   removeLayerById: removeLayer,   // includes confirmation dialog
@@ -308,6 +320,65 @@ defineExpose({
   z-index: 800;
 }
 
+.layer-backdrop {
+  display: none;
+}
+
+.layer-close-btn {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .layer-panel {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 4px 0 20px rgba(0, 0, 0, 0.25);
+  }
+
+  .layer-panel.is-open {
+    transform: translateX(0);
+  }
+
+  .layer-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0);
+    pointer-events: none;
+    z-index: -1;
+    transition: background 0.25s ease;
+  }
+
+  .layer-panel.is-open .layer-backdrop {
+    background: rgba(0, 0, 0, 0.45);
+    pointer-events: auto;
+  }
+
+  .layer-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+
+  .layer-close-btn:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
+}
+
 .theme-dark .layer-panel {
   background: #2a2a2a;
   border-right: 1px solid #444;
@@ -318,6 +389,7 @@ defineExpose({
   height: 48px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   background: #343a40;
   flex-shrink: 0;
 }

@@ -21,9 +21,23 @@
           <span class="ctx-tab-name">{{ selectedLayer.name }}</span>
         </button>
       </template>
+
+      <!-- Collapse toggle -->
+      <div class="ribbon-spacer"></div>
+      <button
+        class="ribbon-collapse-btn"
+        @click="isCollapsed = !isCollapsed"
+        :title="isCollapsed ? 'Show ribbon' : 'Hide ribbon'"
+        :aria-label="isCollapsed ? 'Expand ribbon' : 'Collapse ribbon'"
+      >
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline v-if="isCollapsed" points="6 9 12 15 18 9"/>
+          <polyline v-else points="18 15 12 9 6 15"/>
+        </svg>
+      </button>
     </div>
 
-    <div class="ribbon-content" :class="{ 'ctx-active': activeTab === 'layer' && selectedLayer }">
+    <div v-show="!isCollapsed" class="ribbon-content" :class="{ 'ctx-active': activeTab === 'layer' && selectedLayer }">
       <!-- Insert Tab -->
       <div v-if="activeTab === 'insert'" class="ribbon-panel">
         <div class="ribbon-group">
@@ -438,6 +452,7 @@ const appConfig = inject('config');
 const allowUpload = computed(() => appConfig?.value?.ui?.viewer_upload !== false);
 
 const activeTab = ref('insert');
+const isCollapsed = ref(false);
 const modelInput = ref(null);
 const pointcloudInput = ref(null);
 const camerasInput = ref(null);
@@ -633,6 +648,12 @@ const handleDEMFile = (event) => {
   background: #343a40;
   padding: 0;
   min-height: 28px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ribbon-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .theme-dark .ribbon-tabs {
@@ -668,12 +689,41 @@ const handleDEMFile = (event) => {
   color: #e0e0e0;
 }
 
+.ribbon-spacer {
+  flex: 1;
+}
+
+.ribbon-collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  border: none;
+  background: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+
+.ribbon-collapse-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .ribbon-content {
   padding: 0 6px;
   height: 64px;
   background: #f8f9fa;
   display: flex;
   align-items: stretch;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.ribbon-content::-webkit-scrollbar {
+  display: none;
 }
 
 .theme-dark .ribbon-content {
