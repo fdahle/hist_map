@@ -495,6 +495,7 @@ import { storeToRefs } from 'pinia';
 import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
 import { usePinStore } from '@/stores/map/pinStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { LAYER_STATUS } from '@/constants/layerConstants.js';
 import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_VOLUME, ICON_3D, ICON_SHARE, ICON_INFO, ICON_SAVE_IMAGE, ICON_BOOKMARK_ADD } from '@/constants/icons';
 import { COLORMAPS } from '@/constants/colormaps.js';
@@ -516,13 +517,15 @@ const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elev
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
 const pinStore = usePinStore();
+const settingsStore = useSettingsStore();
 const { crsName } = storeToRefs(mapStore);
+const { viewerEnabled } = storeToRefs(settingsStore);
 const pinCount = computed(() => pinStore.pins.length);
 const layerManager = inject('layerManager');
 const appConfig = inject('config');
 const allowDownload = computed(() => appConfig?.value?.ui?.map_download !== false);
 const allowUpload   = computed(() => appConfig?.value?.ui?.map_upload   !== false);
-const allowViewer   = computed(() => appConfig?.value?.ui?.viewer_access !== false);
+const allowViewer   = computed(() => appConfig?.value?.ui?.viewer_access !== false && viewerEnabled.value);
 
 const activeTab = ref('main');
 const fileInput = ref(null);

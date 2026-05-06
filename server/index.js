@@ -21,7 +21,7 @@ import config, { isDevelopment, isProduction } from './src/config.js';
 import logger from './src/logger.js';
 import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, readLinks, writeLinks, validateLayerId, resolveInDir, safeLayerExt } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
-import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink, parseGeoFile, serializeGeoFile } from './processors/uploadProcessor.js';
+import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink, applyCsvLayerLink, parseGeoFile, serializeGeoFile } from './processors/uploadProcessor.js';
 import { stampFeatureIds } from './processors/shapeProcessor.js';
 import { convertToCog, isGdalAvailable } from './processors/geotiffProcessor.js';
 import { convertToCopc, isPdalAvailable } from './processors/pointcloudProcessor.js';
@@ -813,6 +813,59 @@ app.put('/admin/layers/:id/links', requireAdminAuth, express.json({ limit: '1mb'
       if (typeof cl.featureJoinProperty !== 'string' || !cl.featureJoinProperty)
         return res.status(400).json({ error: 'csvLink.featureJoinProperty must be a non-empty string.' });
     }
+
+    // Apply CSV joins to the GeoJSON layer so the merged columns are available
+    // for group-by, search fields, and extended search.
+    const targetMeta = await readLayerMeta(layersDir, req.params.id);
+    if (targetMeta.fileType === 'geojson') {
+      // Collect all columns that were previously joined (to strip before re-applying)
+      const oldLinks = await readLinks(layersDir, req.params.id);
+      const allOldJoinedCols = (oldLinks.csvLinks ?? []).flatMap(cl => cl.joinedColumns ?? []);
+
+      // For each incoming csvLink, apply the join and record which columns were added
+      for (const cl of csvLinks) {
+        // Columns from other links that are still active (don't strip them)
+        const otherActiveJoined = csvLinks
+          .filter(other => other !== cl)
+          .flatMap(other => other.joinedColumns ?? []);
+        const oldJoinedForThisLink = allOldJoinedCols.filter(c => !otherActiveJoined.includes(c));
+        try {
+          cl.joinedColumns = await applyCsvLayerLink(
+            req.params.id,
+            cl.dataLayerId,
+            layersDir,
+            { csvJoinColumn: cl.csvJoinColumn, featureJoinProperty: cl.featureJoinProperty },
+            oldJoinedForThisLink,
+          );
+        } catch (joinErr) {
+          logger.warn(`CSV join failed for link ${cl.dataLayerId} → ${req.params.id}: ${joinErr.message}`);
+          cl.joinedColumns = [];
+        }
+      }
+
+      // Strip joined columns from any csvLinks that were removed
+      const removedCols = allOldJoinedCols.filter(c =>
+        !csvLinks.some(cl => (cl.joinedColumns ?? []).includes(c))
+      );
+      if (removedCols.length > 0) {
+        try {
+          // Re-read after joins were written, then strip removed columns
+          const ext         = safeLayerExt(targetMeta.extension || '.geojson');
+          const geojsonPath = resolveInDir(layersDir, req.params.id, `${req.params.id}${ext}`);
+          const raw         = await fs.readFile(geojsonPath, 'utf8');
+          const { features: featuresList, header } = parseGeoFile(raw, geojsonPath);
+          const colSet = new Set(removedCols);
+          const cleaned = featuresList.map(f => {
+            for (const col of colSet) delete f.properties?.[col];
+            return f;
+          });
+          await fs.writeFile(geojsonPath, serializeGeoFile(cleaned, header, geojsonPath), 'utf8');
+        } catch (stripErr) {
+          logger.warn(`Failed to strip removed CSV columns: ${stripErr.message}`);
+        }
+      }
+    }
+
     const links = { csvLinks, featureLinks };
     await writeLinks(layersDir, req.params.id, links);
     res.json(links);

@@ -963,3 +963,83 @@ export async function applyCsvLink(layerId, layersDir, csvLink, oldJoinedCols = 
 
   return newCols;
 }
+
+/**
+ * Apply a CSV attribute join to a GeoJSON layer using a standalone CSV data layer.
+ *
+ * Unlike `applyCsvLink` (which reads a sub-file attached to the same layer),
+ * this function reads the CSV from a separate layer directory identified by
+ * `csvLayerId`. Used by the Linking tab's PUT /admin/layers/:id/links endpoint.
+ *
+ * @param {string}   targetLayerId   GeoJSON layer UUID to enrich
+ * @param {string}   csvLayerId      Standalone CSV layer UUID to read from
+ * @param {string}   layersDir       Absolute path to the layers root directory
+ * @param {object}   opts            { csvJoinColumn, featureJoinProperty }
+ * @param {string[]} [oldJoinedCols] Column names previously joined (to strip first)
+ * @returns {Promise<string[]>} Names of the columns that were added to features
+ */
+export async function applyCsvLayerLink(targetLayerId, csvLayerId, layersDir, { csvJoinColumn, featureJoinProperty }, oldJoinedCols = []) {
+  // Read the CSV layer's metadata to find file extension and delimiter
+  const csvMeta = await readLayerMeta(layersDir, csvLayerId);
+  const csvExt  = safeLayerExt(csvMeta.extension || '.csv');
+  const csvPath = resolveInDir(layersDir, csvLayerId, `${csvLayerId}${csvExt}`);
+  const csvText = await fs.readFile(csvPath, 'utf8');
+
+  // Detect delimiter
+  const firstNewline = csvText.indexOf('\n');
+  const headerLine   = firstNewline !== -1 ? csvText.slice(0, firstNewline) : csvText;
+  const delimiter    = csvMeta.csvDelimiter ?? detectCsvDelimiter(headerLine);
+
+  // Parse CSV
+  let records;
+  try {
+    records = csvParse(csvText, {
+      columns:          true,
+      skip_empty_lines: true,
+      trim:             true,
+      relax_quotes:     true,
+      delimiter,
+    });
+  } catch (err) {
+    throw new Error(`CSV parse error: ${err.message}`);
+  }
+  if (records.length === 0) throw new Error('CSV has no data rows.');
+
+  const csvColumns = Object.keys(records[0]);
+  if (!csvColumns.includes(csvJoinColumn)) {
+    throw new Error(`CSV join column "${csvJoinColumn}" not found. Available: ${csvColumns.join(', ')}`);
+  }
+
+  // Build lookup: join column value → row
+  const lookup = new Map();
+  for (const row of records) {
+    const key = String(row[csvJoinColumn] ?? '');
+    if (key !== '') lookup.set(key, row);
+  }
+
+  // Columns to merge (exclude the join key to avoid overwriting the original property)
+  const newCols = csvColumns.filter((c) => c !== csvJoinColumn);
+
+  // Read the target GeoJSON
+  const targetMeta    = await readLayerMeta(layersDir, targetLayerId);
+  const ext           = safeLayerExt(targetMeta.extension || '.geojson');
+  const geojsonPath   = resolveInDir(layersDir, targetLayerId, `${targetLayerId}${ext}`);
+  const raw           = await fs.readFile(geojsonPath, 'utf8');
+  const { features: featuresList, header } = parseGeoFile(raw, geojsonPath);
+
+  // Strip old columns, apply new join
+  const colsToRemove = new Set(oldJoinedCols);
+  const enriched = featuresList.map((feature) => {
+    if (!feature.properties) feature.properties = {};
+    for (const col of colsToRemove) delete feature.properties[col];
+    const featureVal = String(feature.properties[featureJoinProperty] ?? '');
+    const match      = lookup.get(featureVal);
+    if (match) {
+      for (const col of newCols) feature.properties[col] = match[col];
+    }
+    return feature;
+  });
+
+  await fs.writeFile(geojsonPath, serializeGeoFile(enriched, header, geojsonPath), 'utf8');
+  return newCols;
+}
