@@ -55,6 +55,7 @@
       :is-visible="infoModalVisible"
       :title="infoModalTitle"
       :rows="infoModalRows"
+      :description="infoModalDescription"
       @close="infoModalVisible = false"
     />
   </div>
@@ -92,6 +93,7 @@ const toggle = () => { isOpen.value = !isOpen.value; };
 const infoModalVisible = ref(false);
 const infoModalTitle = ref('');
 const infoModalRows = ref([]);
+const infoModalDescription = ref(null);
 
 const getLayerIcon = (type) => {
   switch(type) {
@@ -279,6 +281,7 @@ const handleMenuAction = ({ type, layer }) => {
   if (type === 'info') {
     infoModalRows.value = collectLayerInfo(layer);
     infoModalTitle.value = layer.name;
+    infoModalDescription.value = layer.description ?? null;
     infoModalVisible.value = true;
   } else if (type === 'zoom') {
     emit('zoom-to-layer', layer);
@@ -290,6 +293,7 @@ const handleMenuAction = ({ type, layer }) => {
 const openInfoForLayer = (layer) => {
   infoModalRows.value = collectLayerInfo(layer);
   infoModalTitle.value = layer.name;
+  infoModalDescription.value = layer.description ?? null;
   infoModalVisible.value = true;
 };
 

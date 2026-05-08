@@ -71,8 +71,10 @@
             <span class="flag-label">Map viewer access</span>
             <span class="flag-desc">Allow non-admin users to open the map viewer</span>
           </div>
-          <div class="toggle-switch">
-            <input id="flag-map-access" v-model="draft.ui.map_access" type="checkbox" @change="scheduleSave" />
+          <div class="toggle-switch" :title="draft.ui.map_access && !draft.ui.viewer_access ? 'At least one viewer must remain enabled' : ''">
+            <input id="flag-map-access" v-model="draft.ui.map_access" type="checkbox"
+              :disabled="draft.ui.map_access && !draft.ui.viewer_access"
+              @change="scheduleSave" />
             <label for="flag-map-access" class="slider"></label>
           </div>
         </div>
@@ -82,8 +84,10 @@
             <span class="flag-label">3D viewer access</span>
             <span class="flag-desc">Allow non-admin users to open the 3D viewer</span>
           </div>
-          <div class="toggle-switch">
-            <input id="flag-viewer-access" v-model="draft.ui.viewer_access" type="checkbox" @change="scheduleSave" />
+          <div class="toggle-switch" :title="draft.ui.viewer_access && !draft.ui.map_access ? 'At least one viewer must remain enabled' : ''">
+            <input id="flag-viewer-access" v-model="draft.ui.viewer_access" type="checkbox"
+              :disabled="draft.ui.viewer_access && !draft.ui.map_access"
+              @change="scheduleSave" />
             <label for="flag-viewer-access" class="slider"></label>
           </div>
         </div>
@@ -308,6 +312,7 @@ async function changePassword() {
 }
 input:checked + .slider { background: #3b82f6; }
 input:checked + .slider::after { transform: translateX(16px); }
+input:disabled + .slider { opacity: 0.5; cursor: not-allowed; }
 
 /* Buttons */
 .btn-primary-sm {

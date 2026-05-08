@@ -181,8 +181,9 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
+import { getApiUrl } from '@/utils/config';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { logger } from '@/utils/logger';
 import Viewer3DCanvas from '@/components/viewer3D/Canvas.vue';
@@ -275,6 +276,28 @@ const storedName = _stored.name || 'Model';
 const modelUrls = ref(_stored.models || []);
 const pointcloudUrls = ref(_stored.pointclouds || []);
 const coordinates = ref({ x: _stored.x || 0, y: _stored.y || 0 });
+
+// Map of layer UUID → description fetched from /layers/:id/meta
+const layerDescriptions = ref({});
+
+function extractLayerUuid(url) {
+  const match = url?.match(/\/layers\/([0-9a-f-]{36})\//i);
+  return match?.[1] ?? null;
+}
+
+onMounted(async () => {
+  const allUrls = [...modelUrls.value, ...pointcloudUrls.value];
+  const uuids = [...new Set(allUrls.map(extractLayerUuid).filter(Boolean))];
+  await Promise.all(uuids.map(async (uuid) => {
+    try {
+      const res = await fetch(getApiUrl(`/layers/${uuid}/meta`));
+      if (res.ok) {
+        const data = await res.json();
+        if (data.description) layerDescriptions.value[uuid] = data.description;
+      }
+    } catch { /* non-fatal */ }
+  }));
+});
 
 // Scene events
 const onSceneReady = () => {
@@ -380,12 +403,14 @@ const onModelLoaded = ({ url, index, object, isFileDrop }) => {
     
     logger.debug('3DView', `Adding to layer manager: ${layerName} (type: ${layerType})`);
     
+    const layerUuid = extractLayerUuid(url);
     layerManagerRef.value.addLayer({
       id: object.uuid,
       name: layerName,
       type: layerType,
       visible: true,
-      object: object
+      object: object,
+      description: layerUuid ? (layerDescriptions.value[layerUuid] ?? null) : null,
     });
   } else {
     logger.warn('3DView', 'Could not add to layer manager:', { layerManagerRef: layerManagerRef.value, object });

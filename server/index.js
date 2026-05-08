@@ -593,12 +593,14 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
   try {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
-    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, thumbnail_url, download_url, pointType, group_by, csvLink } = req.body ?? {};
+    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, thumbnail_url, download_url, pointType, group_by, csvLink, description, notes } = req.body ?? {};
     if (displayName  != null && String(displayName).length  > 200)  return res.status(400).json({ error: 'displayName too long (max 200)' });
     if (color        != null && String(color).length        > 100)  return res.status(400).json({ error: 'color too long (max 100)' });
     if (stroke_color != null && String(stroke_color).length > 100)  return res.status(400).json({ error: 'stroke_color too long (max 100)' });
     if (fill_color   != null && String(fill_color).length   > 100)  return res.status(400).json({ error: 'fill_color too long (max 100)' });
     if (attribution  != null && String(attribution).length  > 1000) return res.status(400).json({ error: 'attribution too long (max 1000)' });
+    if (description  != null && String(description).length  > 2000) return res.status(400).json({ error: 'description too long (max 2000)' });
+    if (notes        != null && String(notes).length        > 5000) return res.status(400).json({ error: 'notes too long (max 5000)' });
     if (displayName  != null) meta.layerConfig.displayName  = String(displayName);
     if (visible      != null) meta.layerConfig.visible      = Boolean(visible);
     if (order        != null) meta.layerConfig.order        = Number(order);
@@ -616,6 +618,8 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     if ('download_url'  in (req.body ?? {})) meta.layerConfig.download_url  = download_url  ? String(download_url)  : null;
     if ('pointType'     in (req.body ?? {})) meta.layerConfig.pointType     = pointType ? String(pointType) : null;
     if ('group_by'      in (req.body ?? {})) meta.layerConfig.group_by      = group_by  ? String(group_by)  : null;
+    if ('description'   in (req.body ?? {})) meta.layerConfig.description   = description ? String(description) : null;
+    if ('notes'         in (req.body ?? {})) meta.layerConfig.notes         = notes       ? String(notes)       : null;
     // CRS override (any layer type)
     const { sourceCrs, tiffProjection } = req.body ?? {};
     if (sourceCrs != null) meta.layerConfig.sourceCrs = String(sourceCrs);
@@ -991,7 +995,7 @@ app.get('/layers/:id/meta', dataRateLimit, async (req, res) => {
   try {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
-    res.json({ id: meta.id, name: meta.layerConfig?.displayName || meta.originalName, fileType: meta.fileType, extension: meta.extension });
+    res.json({ id: meta.id, name: meta.layerConfig?.displayName || meta.originalName, fileType: meta.fileType, extension: meta.extension, description: meta.layerConfig?.description || null });
   } catch (err) {
     return handleRouteError(res, err);
   }

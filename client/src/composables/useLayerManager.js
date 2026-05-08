@@ -101,6 +101,7 @@ export function useLayerManager(map) {
             isUserAdded:   layerConf.isUserAdded ?? false,
             attribution:   layerConf.attribution ?? null,
             url:           layerConf.url,
+            description:   layerConf.description ?? null,
             metadata: {
               bands: null, dataMin: null, dataMax: null, noDataValue: null,
               extent: null, tiffProjection: layerConf.tiffProjection ?? null, file: null,
@@ -134,9 +135,10 @@ export function useLayerManager(map) {
     layerStore.addLayer({
       ...layerConfig,
       category,
-      isUserAdded: layerConf.isUserAdded ?? false,
-      attribution: layerConf.attribution ?? null,
-      order: layerConf.order ?? 0,
+      isUserAdded:  layerConf.isUserAdded  ?? false,
+      attribution:  layerConf.attribution  ?? null,
+      order:        layerConf.order        ?? 0,
+      description:  layerConf.description  ?? null,
     });
 
     if (layerConfig.layerInstance) {

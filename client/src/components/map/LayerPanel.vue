@@ -226,6 +226,7 @@
       :is-visible="infoModalVisible"
       :title="infoModalTitle"
       :rows="infoModalRows"
+      :description="infoModalDescription"
       @close="infoModalVisible = false"
     />
   </div>
@@ -257,6 +258,7 @@ const contextMenuRef = ref(null);
 const infoModalVisible = ref(false);
 const infoModalTitle = ref('');
 const infoModalRows = ref([]);
+const infoModalDescription = ref(null);
 
 const GEOM_LABELS = { point: 'Point', line: 'Line', polygon: 'Polygon', raster: 'Raster', unknown: 'Unknown' };
 const TYPE_LABELS = { geojson: 'GeoJSON', geotiff: 'GeoTIFF', wms: 'WMS', wmts: 'WMTS', tile: 'Tile' };
@@ -365,6 +367,7 @@ const handleMenuAction = ({ type, layer }) => {
 
     infoModalRows.value = rows;
     infoModalTitle.value = layer.name;
+    infoModalDescription.value = layer.description ?? null;
     infoModalVisible.value = true;
     return;
   }

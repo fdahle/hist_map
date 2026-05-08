@@ -12,6 +12,7 @@
         </div>
 
         <div class="lim-body">
+          <div v-if="description" class="lim-description">{{ description }}</div>
           <table class="lim-table">
             <tbody>
               <template v-for="(row, i) in rows" :key="row.key">
@@ -41,9 +42,10 @@ import { watch, onUnmounted } from 'vue';
 import { ICON_INFO, ICON_CLOSE } from '@/constants/icons.js';
 
 const props = defineProps({
-  isVisible: { type: Boolean, default: false },
-  title:     { type: String, default: 'Layer Info' },
-  rows:      { type: Array, default: () => [] },
+  isVisible:   { type: Boolean, default: false },
+  title:       { type: String, default: 'Layer Info' },
+  rows:        { type: Array, default: () => [] },
+  description: { type: String, default: null },
 });
 
 const emit = defineEmits(['close']);
@@ -190,6 +192,22 @@ onUnmounted(() => document.removeEventListener('keydown', handleEsc));
 .lim-body::-webkit-scrollbar-track { background: transparent; }
 .lim-body::-webkit-scrollbar-thumb { background: #555; border-radius: 3px; }
 .theme-light .lim-body::-webkit-scrollbar-thumb { background: #bbb; }
+
+/* ── Description ────────────────────────────────────────────────────────────── */
+.lim-description {
+  padding: 10px 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #c8c8c8;
+  border-bottom: 1px solid #333;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.theme-light .lim-description {
+  color: #444;
+  border-bottom-color: #e0e0e0;
+}
 
 /* ── Table ──────────────────────────────────────────────────────────────────── */
 .lim-table {

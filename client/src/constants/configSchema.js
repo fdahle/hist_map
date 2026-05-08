@@ -57,7 +57,7 @@ export const CONFIG_SCHEMA = {
   // Common layer fields (apply to all layer types)
   commonLayerFields: {
     required: ["name", "type", "visible", "order"],
-    optional: ["attribution"],
+    optional: ["attribution", "description"],
   },
 };
 

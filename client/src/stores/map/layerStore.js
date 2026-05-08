@@ -58,6 +58,7 @@ export const useLayerStore = defineStore("layers", () => {
     downloadUrl = null,
     colorBy = null,
     order = 0,
+    description = null,
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
@@ -130,6 +131,7 @@ export const useLayerStore = defineStore("layers", () => {
       thumbnailUrl,
       downloadUrl,
       colorBy,
+      description,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.

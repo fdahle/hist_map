@@ -59,10 +59,12 @@ export function createLayerMeta({ id, originalName, fileType, options = {} }) {
     // ── Relations ─────────────────────────────────────────────────────────────
     subFiles: [],
     layerConfig: {
-      displayName: options.displayName ?? path.parse(originalName).name,
-      visible:     options.visible     ?? true,
-      order:       options.order       ?? 0,
-      type:        fileTypeToLayerType(fileType),
+      displayName:  options.displayName ?? path.parse(originalName).name,
+      visible:      options.visible     ?? true,
+      order:        options.order       ?? 0,
+      type:         fileTypeToLayerType(fileType),
+      description:  null,
+      notes:        null,
     },
     processingLog: [],
   };

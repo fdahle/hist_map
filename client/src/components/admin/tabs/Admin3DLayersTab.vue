@@ -169,6 +169,20 @@
             </div>
           </template>
 
+          <div class="edit-section-heading">About</div>
+          <div class="edit-row">
+            <div class="edit-field edit-field-grow">
+              <label>Description <span class="edit-field-hint">(visible to viewers)</span></label>
+              <textarea v-model="editDraft.description" rows="2" placeholder="Short description shown in Layer Info…" class="edit-textarea"></textarea>
+            </div>
+          </div>
+          <div class="edit-row">
+            <div class="edit-field edit-field-grow">
+              <label>Notes <span class="edit-field-hint">(internal — never shown to users)</span></label>
+              <textarea v-model="editDraft.notes" rows="2" placeholder="Internal notes, reminders, data source details…" class="edit-textarea"></textarea>
+            </div>
+          </div>
+
           <div class="edit-footer">
             <button v-if="layer.keepOriginal" class="btn-secondary-sm" @click="onDownloadOriginal(layer)">↓ Original</button>
             <span class="edit-footer-spacer" />
@@ -370,6 +384,8 @@ function toggleEdit(layer) {
     order:          lc.order          ?? 0,
     sourceCrs:      lc.sourceCrs      ?? layer.sourceCrs ?? '',
     copcConverted:  layer.optimized   ?? false,
+    description:    lc.description    ?? '',
+    notes:          lc.notes          ?? '',
   };
   editingId.value = layer.id;
   editError.value = '';
@@ -400,9 +416,11 @@ async function saveEdit(id) {
   editError.value  = '';
 
   const patch = {
-    displayName: editDraft.value.displayName || null,
-    order:       editDraft.value.order       ?? 0,
-    sourceCrs:   editDraft.value.sourceCrs?.trim() || null,
+    displayName:  editDraft.value.displayName || null,
+    order:        editDraft.value.order       ?? 0,
+    sourceCrs:    editDraft.value.sourceCrs?.trim() || null,
+    description:  editDraft.value.description?.trim() || null,
+    notes:        editDraft.value.notes?.trim() || null,
   };
 
   try {
@@ -528,6 +546,9 @@ async function onDownloadOriginal(layer) {
 .lc-edit-panel { padding: 0.85rem 0.9rem; border-top: 1px solid var(--admin-border, #e0e0e0); background: var(--admin-bg, #f9fafb); }
 .edit-section-heading { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--admin-muted, #777); margin: 0.75rem 0 0.4rem; }
 .edit-section-heading:first-child { margin-top: 0; }
+.edit-section-admin { color: #b45309; border-top: 1px solid var(--admin-input-border, #e5e7eb); padding-top: 0.5rem; margin-top: 0.75rem; }
+.edit-textarea { padding: 0.35rem 0.5rem; border: 1px solid var(--admin-input-border, #ccc); border-radius: 5px; font-size: 0.82rem; background: var(--admin-input-bg, #fff); color: var(--admin-text, #1a1a1a); resize: vertical; font-family: inherit; width: 100%; box-sizing: border-box; }
+.edit-textarea:focus { outline: 2px solid #7c3aed; }
 .edit-row { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .edit-field { display: flex; flex-direction: column; gap: 0.25rem; min-width: 120px; }
 .edit-field label { font-size: 0.78rem; font-weight: 500; color: var(--admin-text, #333); }
