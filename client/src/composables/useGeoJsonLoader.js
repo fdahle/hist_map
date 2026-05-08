@@ -272,7 +272,7 @@ async function applyLinksToFeatures(layerId, source) {
     }
   }
 
-  // ── Sub-file URL links (LinkingModal / DataLayersSection) ─────────────────
+  // ── Sub-file URL links (legacy featureUrls format) ────────────────────────
   for (const fu of featureUrls) {
     const modelUrls  = (fu.modelUrls      ?? []).map(u => getApiUrl(`/${u}`));
     const pcUrls     = (fu.pointcloudUrls ?? []).map(u => getApiUrl(`/${u}`));

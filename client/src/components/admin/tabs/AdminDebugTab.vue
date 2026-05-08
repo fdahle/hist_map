@@ -116,6 +116,94 @@
       </div>
     </div>
 
+    <!-- ── Orphan Cleanup ───────────────────────────────────────────────────── -->
+    <div class="settings-card">
+      <div class="card-header">
+        <h3 class="card-title">Orphan Cleanup</h3>
+        <button class="btn-refresh" :disabled="scanning" @click="runScan" title="Scan now">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"
+            stroke-linecap="round" :class="{ spin: scanning }">
+            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+          {{ scanning ? 'Scanning…' : 'Scan' }}
+        </button>
+      </div>
+      <p class="card-desc">Find layers left behind after failed deletes or abandoned uploads. Nothing is deleted until you confirm.</p>
+      <p v-if="scanError" class="lib-error">{{ scanError }}</p>
+
+      <div v-if="!scanned && !scanning" class="empty-state">Click <strong>Scan</strong> to check for leftover data.</div>
+      <div v-else-if="scanning" class="empty-state">Scanning…</div>
+      <template v-else>
+        <div v-if="totalIssues === 0" class="clean-notice">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+          No issues found.
+        </div>
+        <template v-else>
+
+          <!-- Unreferenced layers -->
+          <div v-if="unreferencedLayers.length" class="orphan-section">
+            <div class="orphan-section-header">
+              <span class="orphan-section-title">Unreferenced layers <span class="issue-badge">{{ unreferencedLayers.length }}</span></span>
+              <button v-if="selectedIds.size > 0" class="btn-danger-sm" :disabled="executing" @click="deleteSelected">
+                {{ executing ? 'Deleting…' : `Delete ${selectedIds.size} selected` }}
+              </button>
+            </div>
+            <p class="orphan-desc">On disk but not shown on the map and not linked by any other layer.</p>
+            <div class="layer-checklist">
+              <label v-for="layer in unreferencedLayers" :key="layer.id" class="layer-check-row">
+                <input type="checkbox" :value="layer.id" v-model="checkedIds" />
+                <span class="layer-check-info">
+                  <span class="layer-check-name">{{ layer.layerConfig?.displayName || layer.originalName }}</span>
+                  <span class="layer-type-badge" :class="'badge-' + layer.fileType">{{ layer.fileType }}</span>
+                </span>
+                <span class="layer-check-meta">
+                  <span>{{ formatDate(layer.uploadedAt) }}</span>
+                  <span v-if="layer.fileSizeBytes">{{ formatBytes(layer.fileSizeBytes) }}</span>
+                </span>
+              </label>
+            </div>
+            <p v-if="executeError"   class="lib-error">{{ executeError }}</p>
+            <p v-if="executeSuccess" class="form-success">{{ executeSuccess }}</p>
+          </div>
+
+          <!-- Stale config refs -->
+          <div v-if="staleConfigRefs.length" class="orphan-section">
+            <div class="orphan-section-header">
+              <span class="orphan-section-title">Stale config references <span class="issue-badge">{{ staleConfigRefs.length }}</span></span>
+              <button class="btn-primary-sm" :disabled="executing" @click="fixStaleRefs">
+                {{ executing ? 'Fixing…' : 'Fix All' }}
+              </button>
+            </div>
+            <p class="orphan-desc"><code>config.yaml</code> entries pointing to layer directories that no longer exist.</p>
+            <div class="id-list">
+              <code v-for="id in staleConfigRefs" :key="id" class="id-row">{{ id }}</code>
+            </div>
+            <p v-if="refFixSuccess" class="form-success">{{ refFixSuccess }}</p>
+          </div>
+
+          <!-- Broken links -->
+          <div v-if="brokenLinks.length" class="orphan-section">
+            <div class="orphan-section-header">
+              <span class="orphan-section-title">Broken cross-layer links <span class="issue-badge">{{ brokenLinks.length }}</span></span>
+              <button class="btn-primary-sm" :disabled="executing" @click="fixBrokenLinks">
+                {{ executing ? 'Fixing…' : 'Fix All' }}
+              </button>
+            </div>
+            <p class="orphan-desc">Link references in <code>.links.json</code> files pointing to layers that no longer exist.</p>
+            <div class="broken-list">
+              <div v-for="item in brokenLinks" :key="item.ownerId" class="broken-row">
+                <span class="broken-owner">{{ item.ownerName }}</span>
+                <span class="broken-refs">{{ item.refs.length }} broken ref{{ item.refs.length !== 1 ? 's' : '' }}</span>
+              </div>
+            </div>
+            <p v-if="linkFixSuccess" class="form-success">{{ linkFixSuccess }}</p>
+          </div>
+
+        </template>
+      </template>
+    </div>
+
     <!-- ── Danger Zone ────────────────────────────────────────────────────── -->
     <div class="settings-card danger-card">
       <h3 class="card-title danger-title">Danger Zone</h3>
@@ -288,6 +376,92 @@ const diskSegments = computed(() => {
   return segs;
 });
 
+// ── Orphan cleanup ─────────────────────────────────────────────────────────────
+const scanning           = ref(false);
+const scanned            = ref(false);
+const scanError          = ref('');
+const unreferencedLayers = ref([]);
+const staleConfigRefs    = ref([]);
+const brokenLinks        = ref([]);
+const totalIssues        = computed(() =>
+  unreferencedLayers.value.length + staleConfigRefs.value.length + brokenLinks.value.length
+);
+
+const checkedIds     = ref([]);
+const executing      = ref(false);
+const executeError   = ref('');
+const executeSuccess = ref('');
+const refFixSuccess  = ref('');
+const linkFixSuccess = ref('');
+const selectedIds    = computed(() => new Set(checkedIds.value));
+
+async function runScan() {
+  scanning.value = true; scanError.value = ''; executeSuccess.value = ''; executeError.value = '';
+  refFixSuccess.value = ''; linkFixSuccess.value = ''; checkedIds.value = [];
+  try {
+    const res = await fetch(getApiUrl('/admin/cleanup/scan'), { headers: authHeaders() });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+    unreferencedLayers.value = data.unreferencedLayers ?? [];
+    staleConfigRefs.value    = data.staleConfigRefs    ?? [];
+    brokenLinks.value        = data.brokenLinks        ?? [];
+    scanned.value = true;
+  } catch (err) { scanError.value = err.message; }
+  finally { scanning.value = false; }
+}
+
+async function deleteSelected() {
+  if (selectedIds.value.size === 0) return;
+  executing.value = true; executeError.value = ''; executeSuccess.value = '';
+  try {
+    const res = await fetch(getApiUrl('/admin/cleanup/execute'), {
+      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ layerIds: [...selectedIds.value] }),
+    });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || `Server error: ${res.status}`); }
+    const data = await res.json();
+    executeSuccess.value = `Deleted ${data.deletedLayers.length} layer(s).`;
+    checkedIds.value = [];
+    await runScan();
+  } catch (err) { executeError.value = err.message; }
+  finally { executing.value = false; }
+}
+
+async function fixStaleRefs() {
+  executing.value = true; refFixSuccess.value = '';
+  try {
+    const res = await fetch(getApiUrl('/admin/cleanup/execute'), {
+      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fixStaleRefs: true }),
+    });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || `Server error: ${res.status}`); }
+    const data = await res.json();
+    refFixSuccess.value = data.fixedConfigRefs > 0 ? `Removed ${data.fixedConfigRefs} stale reference(s) from config.yaml.` : 'Nothing to fix.';
+    await runScan();
+  } catch (err) { refFixSuccess.value = `Error: ${err.message}`; }
+  finally { executing.value = false; }
+}
+
+async function fixBrokenLinks() {
+  executing.value = true; linkFixSuccess.value = '';
+  try {
+    const res = await fetch(getApiUrl('/admin/cleanup/execute'), {
+      method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fixBrokenLinks: true }),
+    });
+    if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error || `Server error: ${res.status}`); }
+    const data = await res.json();
+    linkFixSuccess.value = data.fixedBrokenLinks > 0 ? `Fixed broken links in ${data.fixedBrokenLinks} layer(s).` : 'Nothing to fix.';
+    await runScan();
+  } catch (err) { linkFixSuccess.value = `Error: ${err.message}`; }
+  finally { executing.value = false; }
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
 // ── Danger zone ────────────────────────────────────────────────────────────────
 const resetConfirming       = ref(false);
 const isResetting           = ref(false);
@@ -459,4 +633,65 @@ onMounted(() => {
   background: transparent; border: 1px solid var(--admin-border, #ccc); color: var(--admin-text, #333);
 }
 .btn-secondary-sm:hover { border-color: var(--admin-muted, #999); }
+
+/* Orphan cleanup */
+.card-desc    { font-size: .82rem; color: var(--admin-muted, #777); margin: -.25rem 0 .6rem; line-height: 1.4; }
+.clean-notice { display: flex; align-items: center; gap: .4rem; font-size: .82rem; color: #16a34a; padding: .35rem 0; }
+.orphan-section { margin-top: .85rem; padding-top: .75rem; border-top: 1px solid var(--admin-border, #e0e0e0); }
+.orphan-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.orphan-section-header { display: flex; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .3rem; }
+.orphan-section-title  { font-size: .82rem; font-weight: 600; display: flex; align-items: center; gap: .35rem; }
+.orphan-desc  { font-size: .78rem; color: var(--admin-muted, #777); margin: 0 0 .5rem; line-height: 1.4; }
+
+.issue-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 1.15rem; height: 1.15rem; padding: 0 .3rem;
+  border-radius: 999px; background: #7f1d1d; color: #fca5a5;
+  font-size: .68rem; font-weight: 700;
+}
+
+.layer-checklist { display: flex; flex-direction: column; gap: .3rem; }
+.layer-check-row {
+  display: flex; align-items: center; gap: .55rem;
+  padding: .4rem .45rem; border-radius: 5px; cursor: pointer;
+  background: var(--admin-bg, #f9fafb); border: 1px solid var(--admin-border, #e0e0e0);
+}
+.layer-check-row:hover { border-color: var(--admin-muted, #ccc); }
+.layer-check-info { flex: 1; display: flex; align-items: center; gap: .45rem; min-width: 0; }
+.layer-check-name { font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.layer-check-meta { display: flex; gap: .5rem; font-size: .75rem; color: var(--admin-muted, #777); white-space: nowrap; }
+
+.layer-type-badge {
+  font-size: .68rem; font-weight: 600; padding: .08rem .35rem;
+  border-radius: 4px; text-transform: uppercase; letter-spacing: .03em;
+}
+.badge-geojson    { background: #166534; color: #4ade80; }
+.badge-geotiff    { background: #1e3a5f; color: #60a5fa; }
+.badge-model      { background: #713f12; color: #fbbf24; }
+.badge-pointcloud { background: #3b0764; color: #c084fc; }
+.badge-csv        { background: #164e63; color: #22d3ee; }
+
+.id-list   { display: flex; flex-direction: column; gap: .25rem; }
+.id-row    { font-size: .75rem; color: var(--admin-muted, #94a3b8); }
+
+.broken-list { display: flex; flex-direction: column; gap: .25rem; }
+.broken-row  { display: flex; align-items: center; justify-content: space-between; padding: .3rem .45rem; border-radius: 5px; background: var(--admin-bg, #f9fafb); border: 1px solid var(--admin-border, #e0e0e0); font-size: .82rem; }
+.broken-owner { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.broken-refs  { font-size: .75rem; color: #f87171; white-space: nowrap; margin-left: .5rem; }
+
+.form-success { font-size: .78rem; color: #16a34a; margin: .4rem 0 0; }
+
+.btn-primary-sm {
+  padding: .28rem .6rem; border-radius: 5px; font-size: .75rem; cursor: pointer;
+  background: var(--admin-accent, #2563eb); border: 1px solid transparent; color: #fff; white-space: nowrap;
+}
+.btn-primary-sm:hover:not(:disabled) { opacity: .88; }
+.btn-primary-sm:disabled { opacity: .5; cursor: not-allowed; }
+
+.btn-danger-sm {
+  padding: .28rem .6rem; border-radius: 5px; font-size: .75rem; cursor: pointer;
+  background: #fef2f2; border: 1px solid #fca5a5; color: #ef4444; white-space: nowrap;
+}
+.btn-danger-sm:hover:not(:disabled) { background: #fee2e2; }
+.btn-danger-sm:disabled { opacity: .5; cursor: not-allowed; }
 </style>

@@ -19,7 +19,7 @@ import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import config, { isDevelopment, isProduction } from './src/config.js';
 import logger from './src/logger.js';
-import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, readLinks, writeLinks, validateLayerId, resolveInDir, safeLayerExt } from './src/layerStore.js';
+import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, readLinks, writeLinks, validateLayerId, resolveInDir, safeLayerExt, scanOrphans } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
 import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink, applyCsvLayerLink, parseGeoFile, serializeGeoFile } from './processors/uploadProcessor.js';
 import { stampFeatureIds } from './processors/shapeProcessor.js';
@@ -737,7 +737,7 @@ app.get('/admin/layers/:id/features', requireAdminAuth, async (req, res) => {
     }
 
     const searchFields = meta.layerConfig?.search_fields ?? [];
-    const features = (parsedFeatures ?? []).map(f => {
+    let features = (parsedFeatures ?? []).map(f => {
       const props = f.properties ?? {};
       const id = props._featureId ?? null;
       let label = null;
@@ -753,7 +753,25 @@ app.get('/admin/layers/:id/features', requireAdminAuth, async (req, res) => {
       }
       return { id, label: label ?? id?.slice(0, 8) ?? '?' };
     }).filter(f => f.id);
-    res.json({ features, total: features.length });
+
+    const total = features.length;
+
+    // Optional server-side search filter
+    const searchQ = (req.query.search ?? '').trim().toLowerCase();
+    if (searchQ) {
+      features = features.filter(f =>
+        f.label?.toLowerCase().includes(searchQ) || f.id?.toLowerCase().includes(searchQ)
+      );
+    }
+    const filtered = features.length;
+
+    // Pagination
+    const pageSize = Math.min(Math.max(parseInt(req.query.pageSize) || 100, 1), 1000);
+    const page     = Math.max(parseInt(req.query.page) || 1, 1);
+    const offset   = (page - 1) * pageSize;
+    features = features.slice(offset, offset + pageSize);
+
+    res.json({ features, total, filtered, page, pageSize });
   } catch (err) {
     return handleRouteError(res, err);
   }
@@ -766,6 +784,89 @@ app.delete('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     await deleteLayer(layersDir, req.params.id);
     logger.info(`Deleted layer: ${req.params.id}`);
     res.json({ success: true, deleted: req.params.id });
+  } catch (err) {
+    return handleRouteError(res, err, 400);
+  }
+});
+
+// ── Orphan cleanup ────────────────────────────────────────────────────────────
+
+// Scan for unreferenced layers, stale config refs, and broken links
+app.get('/admin/cleanup/scan', requireAdminAuth, async (_req, res) => {
+  try {
+    const report = await scanOrphans(layersDir, configFilePath);
+    res.json(report);
+  } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// Execute cleanup actions
+app.post('/admin/cleanup/execute', requireAdminAuth, express.json({ limit: '64kb' }), async (req, res) => {
+  try {
+    const { layerIds = [], fixStaleRefs = false, fixBrokenLinks = false } = req.body ?? {};
+    const results = { deletedLayers: [], fixedConfigRefs: 0, fixedBrokenLinks: 0 };
+
+    // Delete unreferenced layer directories
+    for (const id of layerIds) {
+      validateLayerId(id);
+      await deleteLayer(layersDir, id);
+      results.deletedLayers.push(id);
+      logger.info(`Cleanup: deleted unreferenced layer ${id}`);
+    }
+
+    // Remove stale _layerId entries from config.yaml
+    if (fixStaleRefs) {
+      const raw = await fs.readFile(configFilePath, 'utf8');
+      const cfg = yaml.load(raw) ?? {};
+      const entries = await fs.readdir(layersDir, { withFileTypes: true });
+      const diskIds = new Set(entries.filter(e => e.isDirectory()).map(e => e.name));
+      const before = (cfg.data_layers ?? []).length;
+      cfg.data_layers = (cfg.data_layers ?? []).filter(l => !l._layerId || diskIds.has(l._layerId));
+      results.fixedConfigRefs = before - cfg.data_layers.length;
+      if (results.fixedConfigRefs > 0) {
+        await fs.writeFile(configFilePath, yaml.dump(cfg, { lineWidth: -1 }), 'utf8');
+        logger.info(`Cleanup: removed ${results.fixedConfigRefs} stale config reference(s)`);
+      }
+    }
+
+    // Scrub broken link references from all .links.json files
+    if (fixBrokenLinks) {
+      const entries = await fs.readdir(layersDir, { withFileTypes: true }).catch(() => []);
+      const diskIds = new Set(entries.filter(e => e.isDirectory()).map(e => e.name));
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const linksPath = resolveInDir(layersDir, entry.name, `${entry.name}.links.json`);
+        let links;
+        try { links = JSON.parse(await fs.readFile(linksPath, 'utf8')); } catch { continue; }
+        let changed = false;
+        if (Array.isArray(links.featureLinks)) {
+          for (const fl of links.featureLinks) {
+            const mBefore = (fl.modelLayerIds ?? []).length;
+            fl.modelLayerIds = (fl.modelLayerIds ?? []).filter(id => diskIds.has(id));
+            const pBefore = (fl.pointcloudLayerIds ?? []).length;
+            fl.pointcloudLayerIds = (fl.pointcloudLayerIds ?? []).filter(id => diskIds.has(id));
+            if (fl.modelLayerIds.length !== mBefore || fl.pointcloudLayerIds.length !== pBefore) changed = true;
+          }
+          const fBefore = links.featureLinks.length;
+          links.featureLinks = links.featureLinks.filter(fl => fl.modelLayerIds.length > 0 || fl.pointcloudLayerIds.length > 0);
+          if (links.featureLinks.length !== fBefore) changed = true;
+        }
+        if (Array.isArray(links.csvLinks)) {
+          const cBefore = links.csvLinks.length;
+          links.csvLinks = links.csvLinks.filter(cl => !cl.dataLayerId || diskIds.has(cl.dataLayerId));
+          if (links.csvLinks.length !== cBefore) changed = true;
+        }
+        if (changed) {
+          await fs.writeFile(linksPath, JSON.stringify(links, null, 2), 'utf8');
+          results.fixedBrokenLinks++;
+        }
+      }
+      if (results.fixedBrokenLinks > 0)
+        logger.info(`Cleanup: fixed broken links in ${results.fixedBrokenLinks} layer(s)`);
+    }
+
+    res.json({ success: true, ...results });
   } catch (err) {
     return handleRouteError(res, err, 400);
   }
@@ -1313,6 +1414,17 @@ try {
   await fs.writeFile(configFilePath, DEFAULT_CONFIG_YAML, 'utf8');
   logger.info('No config.yaml found — created a default one at', configFilePath);
 }
+
+// Warn about orphaned data at startup
+try {
+  const orphans = await scanOrphans(layersDir, configFilePath);
+  if (orphans.unreferencedLayers.length)
+    logger.warn(`Found ${orphans.unreferencedLayers.length} unreferenced layer(s) on disk — visit Admin → Maintenance to review.`);
+  if (orphans.staleConfigRefs.length)
+    logger.warn(`Found ${orphans.staleConfigRefs.length} stale config reference(s) — visit Admin → Maintenance to fix.`);
+  if (orphans.brokenLinks.length)
+    logger.warn(`Found broken cross-layer links in ${orphans.brokenLinks.length} layer(s) — visit Admin → Maintenance to fix.`);
+} catch { /* non-fatal */ }
 
 // Start server
 app.listen(config.port, config.host, () => {

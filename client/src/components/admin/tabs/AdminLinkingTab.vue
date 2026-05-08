@@ -30,9 +30,10 @@
               <span v-if="l.originalName && l.layerConfig?.displayName && l.layerConfig.displayName !== l.originalName"
                 class="layer-item-orig">{{ l.originalName }}</span>
             </div>
-            <div v-if="selectedLayerId === l.id && !layerLoading" class="layer-item-badges">
-              <span v-if="links.csvLinks.length" class="lbadge lbadge-csv">{{ links.csvLinks.length }} CSV</span>
-              <span v-if="total3DLinks" class="lbadge lbadge-3d">{{ total3DLinks }} 3D</span>
+            <div v-if="layerBadges(l.id)" class="layer-item-badges">
+              <span v-if="layerBadges(l.id).csvCount" class="lbadge lbadge-csv">{{ layerBadges(l.id).csvCount }} CSV</span>
+              <span v-if="layerBadges(l.id).modelCount" class="lbadge lbadge-model">{{ layerBadges(l.id).modelCount }} {{ layerBadges(l.id).modelCount === 1 ? 'model' : 'models' }}</span>
+              <span v-if="layerBadges(l.id).pcCount" class="lbadge lbadge-pc">{{ layerBadges(l.id).pcCount }} {{ layerBadges(l.id).pcCount === 1 ? 'point cloud' : 'point clouds' }}</span>
             </div>
           </div>
         </div>
@@ -57,7 +58,6 @@
             </button>
             <button class="link-tab-btn" :class="{ 'link-tab-active': activeTab === '3d' }" @click="activeTab = '3d'">
               3D Assets
-              <span v-if="total3DLinks" class="tab-count">{{ total3DLinks }}</span>
             </button>
           </div>
 
@@ -135,17 +135,27 @@
                 <!-- Feature list -->
                 <div class="feature-col">
                   <div class="col-header">
-                    <span class="col-title">Features ({{ filteredFeatures.length }}<template v-if="featureSearch.trim() || showLinkedOnly"> / {{ features.length }}</template>)</span>
+                    <span v-if="showLinkedOnly" class="col-title">
+                      Features ({{ filteredFeatures.length }} linked)
+                    </span>
+                    <span v-else-if="featureSearch.trim()" class="col-title">
+                      Features ({{ featuresFiltered }} / {{ featuresTotal }})
+                    </span>
+                    <span v-else class="col-title">
+                      Features ({{ featuresTotal }})
+                    </span>
                   </div>
                   <div class="col-toolbar">
-                    <input v-model="featureSearch" type="search" class="feature-search" placeholder="Search…" />
+                    <input v-model="featureSearch" type="search" class="feature-search" placeholder="Search…" :disabled="showLinkedOnly" />
                     <label class="filter-checkbox-label">
                       <input type="checkbox" v-model="showLinkedOnly" />
                       <span>3D only</span>
                     </label>
                   </div>
-                  <div v-if="featuresLoading" class="col-empty">Loading features…</div>
-                  <div v-else-if="!features.length" class="col-empty">No features found (are UUIDs assigned?).</div>
+                  <div v-if="featuresLoading" class="col-loading">
+                    <span class="spinner"></span> Loading…
+                  </div>
+                  <div v-else-if="!featuresTotal && !showLinkedOnly" class="col-empty">No features found (are UUIDs assigned?).</div>
                   <div v-else class="feature-list">
                     <div
                       v-for="feat in filteredFeatures"
@@ -230,6 +240,24 @@ const threeDLayers     = computed(() => allLayers.value.filter(l => ['model','po
 const modelLayers      = computed(() => allLayers.value.filter(l => l.fileType === 'model'));
 const pointcloudLayers = computed(() => allLayers.value.filter(l => l.fileType === 'pointcloud'));
 
+// ── Per-layer link summary (badges shown on all layers without clicking) ───────
+// { [layerId]: { csvCount, modelCount, pcCount } }
+const allLinksCache = ref({});
+
+function linksToSummary(linksData) {
+  const csvCount   = linksData.csvLinks?.length ?? 0;
+  const modelCount = (linksData.featureLinks ?? []).reduce((s, fl) => s + (fl.modelLayerIds?.length ?? 0), 0);
+  const pcCount    = (linksData.featureLinks ?? []).reduce((s, fl) => s + (fl.pointcloudLayerIds?.length ?? 0), 0);
+  return { csvCount, modelCount, pcCount };
+}
+
+function layerBadges(layerId) {
+  const entry = allLinksCache.value[layerId];
+  if (!entry) return null;
+  if (!entry.csvCount && !entry.modelCount && !entry.pcCount) return null;
+  return entry;
+}
+
 // ── Selection state ────────────────────────────────────────────────────────────
 const selectedLayerId   = ref('');
 const selectedFeatureId = ref(null);
@@ -237,6 +265,8 @@ const activeTab         = ref('csv');
 const layerLoading      = ref(false);
 const featuresLoading   = ref(false);
 const features          = ref([]);
+const featuresTotal     = ref(0);      // total count on server (before search)
+const featuresFiltered  = ref(0);      // count after server-side search
 const featureSearch     = ref('');
 const showLinkedOnly    = ref(false);
 const geojsonColumns    = ref([]);
@@ -250,7 +280,7 @@ const saveError = ref('');
 let saveTimer        = null;
 let saveStateTimer   = null;
 let loadingLinks     = false;
-onUnmounted(() => { clearTimeout(saveTimer); clearTimeout(saveStateTimer); });
+onUnmounted(() => { clearTimeout(saveTimer); clearTimeout(saveStateTimer); clearTimeout(searchTimer); });
 
 function scheduleSave() {
   if (!selectedLayerId.value) return;
@@ -275,6 +305,8 @@ async function saveLinks() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Save failed (${res.status})`);
     }
+    // Update the badge cache for this layer with the new link summary
+    allLinksCache.value[selectedLayerId.value] = linksToSummary(links.value);
     saveState.value = 'saved';
     saveStateTimer = setTimeout(() => { if (saveState.value === 'saved') saveState.value = 'idle'; }, 2500);
   } catch (err) {
@@ -287,8 +319,48 @@ async function saveLinks() {
 async function fetchAllLayers() {
   try {
     const res = await fetch(getApiUrl('/admin/layers'), { headers: authHeaders() });
-    if (res.ok) allLayers.value = await res.json();
+    if (!res.ok) return;
+    allLayers.value = await res.json();
+
+    // Load link summaries for all GeoJSON layers in parallel so badges are
+    // visible immediately without needing to click into each layer.
+    const geoLayers = allLayers.value.filter(l => l.fileType === 'geojson');
+    const results = await Promise.allSettled(
+      geoLayers.map(l =>
+        fetch(getApiUrl(`/admin/layers/${l.id}/links`), { headers: authHeaders() })
+          .then(r => r.ok ? r.json() : null)
+      )
+    );
+    const cache = {};
+    results.forEach((result, i) => {
+      if (result.status === 'fulfilled' && result.value) {
+        cache[geoLayers[i].id] = linksToSummary(result.value);
+      }
+    });
+    allLinksCache.value = cache;
   } catch { /* non-fatal */ }
+}
+
+// Fetch (or re-fetch) features for the selected layer with optional search.
+// Uses server-side pagination: always fetches page 1, pageSize 100.
+async function fetchFeatures(search = '') {
+  if (!selectedLayerId.value) return;
+  featuresLoading.value = true;
+  try {
+    const params = new URLSearchParams({ page: '1', pageSize: '100' });
+    if (search.trim()) params.set('search', search.trim());
+    const res = await fetch(
+      getApiUrl(`/admin/layers/${selectedLayerId.value}/features?${params}`),
+      { headers: authHeaders() }
+    );
+    if (res.ok) {
+      const data = await res.json();
+      features.value     = data.features ?? [];
+      featuresTotal.value    = data.total    ?? 0;
+      featuresFiltered.value = data.filtered ?? data.total ?? 0;
+    }
+  } catch { /* non-fatal */ }
+  finally { featuresLoading.value = false; }
 }
 
 async function fetchLayerData(layerId) {
@@ -296,19 +368,18 @@ async function fetchLayerData(layerId) {
   loadingLinks = true;
   links.value = { csvLinks: [], featureLinks: [] };
   features.value = [];
+  featuresTotal.value = 0;
+  featuresFiltered.value = 0;
   geojsonColumns.value = [];
   selectedFeatureId.value = null;
   try {
-    const [linksRes, featRes, previewRes] = await Promise.all([
+    // Links and preview in parallel; features loaded separately so featuresLoading
+    // can show its own spinner after layerLoading completes.
+    const [linksRes, previewRes] = await Promise.all([
       fetch(getApiUrl(`/admin/layers/${layerId}/links`), { headers: authHeaders() }),
-      fetch(getApiUrl(`/admin/layers/${layerId}/features`), { headers: authHeaders() }),
       fetch(getApiUrl(`/admin/layers/${layerId}/preview?n=1`), { headers: authHeaders() }),
     ]);
     if (linksRes.ok) links.value = await linksRes.json();
-    if (featRes.ok)  {
-      const data = await featRes.json();
-      features.value = data.features ?? [];
-    }
     if (previewRes.ok) {
       const data = await previewRes.json();
       geojsonColumns.value = data.columns ?? [];
@@ -318,6 +389,9 @@ async function fetchLayerData(layerId) {
     loadingLinks = false;
     layerLoading.value = false;
   }
+  // Load features with spinner (separate from layerLoading so the right panel
+  // becomes interactive while features stream in).
+  await fetchFeatures(featureSearch.value);
 }
 
 async function onLayerChange() {
@@ -334,29 +408,39 @@ async function onLayerChange() {
 // Load on mount
 fetchAllLayers();
 
-// ── Total 3D link count (for tab badge) ───────────────────────────────────────
-const total3DLinks = computed(() =>
-  links.value.featureLinks.reduce(
-    (sum, fl) => sum + (fl.modelLayerIds?.length ?? 0) + (fl.pointcloudLayerIds?.length ?? 0), 0
-  )
-);
-
 // ── Select layer ──────────────────────────────────────────────────────────────
 async function selectLayer(id) {
   if (selectedLayerId.value === id) return;
   selectedLayerId.value = id;
+  featureSearch.value = '';
   await onLayerChange();
 }
 
-// ── Feature filtering ──────────────────────────────────────────────────────────
+// ── Debounced search → server re-fetch ────────────────────────────────────────
+let searchTimer = null;
+watch(featureSearch, (val) => {
+  if (!selectedLayerId.value || showLinkedOnly.value) return;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => fetchFeatures(val), 300);
+});
+
+// When "3D only" is toggled off, restore the normal server-driven list.
+watch(showLinkedOnly, (val) => {
+  if (!val && selectedLayerId.value) fetchFeatures(featureSearch.value);
+});
+
+// ── Feature list (server-paginated or linked-only from cache) ─────────────────
 const filteredFeatures = computed(() => {
-  let list = features.value;
-  if (showLinkedOnly.value) list = list.filter(f => hasAny3DLink(f.id));
-  if (featureSearch.value.trim()) {
-    const q = featureSearch.value.toLowerCase();
-    list = list.filter(f => f.label?.toLowerCase().includes(q) || f.id?.toLowerCase().includes(q));
+  if (showLinkedOnly.value) {
+    // featureLinks is small — derive directly from links without a server round-trip.
+    return links.value.featureLinks
+      .filter(fl => fl.modelLayerIds?.length || fl.pointcloudLayerIds?.length)
+      .map(fl => {
+        const loaded = features.value.find(f => f.id === fl.featureId);
+        return loaded ?? { id: fl.featureId, label: fl.featureId.slice(0, 12) + '…' };
+      });
   }
-  return list;
+  return features.value;
 });
 
 // ── CSV link management ────────────────────────────────────────────────────────
@@ -472,12 +556,10 @@ function shortName(name) {
   flex-direction: column;
 }
 .panel-label {
-  padding: 0.6rem 0.75rem 0.5rem;
-  font-size: 0.68rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--admin-muted, #999);
+  padding: 0.6rem 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--admin-muted, #777);
   border-bottom: 1px solid var(--admin-border, #e0e0e0);
 }
 .panel-empty {
@@ -522,10 +604,12 @@ function shortName(name) {
   padding: 0.05rem 0.35rem;
   border-radius: 3px;
 }
-.lbadge-csv { background: #dbeafe; color: #1d4ed8; }
-.lbadge-3d  { background: #ede9fe; color: #7c3aed; }
-:global(body.theme-dark) .lbadge-csv { background: rgba(29,78,216,0.2); color: #93c5fd; }
-:global(body.theme-dark) .lbadge-3d  { background: rgba(124,58,237,0.2); color: #a78bfa; }
+.lbadge-csv   { background: #dbeafe; color: #1d4ed8; }
+.lbadge-model { background: #ede9fe; color: #7c3aed; }
+.lbadge-pc    { background: #dcfce7; color: #15803d; }
+:global(body.theme-dark) .lbadge-csv   { background: rgba(29,78,216,0.2);  color: #93c5fd; }
+:global(body.theme-dark) .lbadge-model { background: rgba(124,58,237,0.2); color: #a78bfa; }
+:global(body.theme-dark) .lbadge-pc    { background: rgba(22,163,74,0.2);  color: #4ade80; }
 
 /* Right: link panel */
 .link-panel {
@@ -650,6 +734,18 @@ function shortName(name) {
 .filter-checkbox-label input[type="checkbox"] { cursor: pointer; }
 .col-title { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--admin-muted, #777); }
 .col-empty { font-size: 0.78rem; color: var(--admin-muted, #aaa); padding: 0.4rem 0; }
+.col-loading {
+  display: flex; align-items: center; gap: 0.4rem;
+  font-size: 0.78rem; color: var(--admin-muted, #aaa); padding: 0.4rem 0;
+}
+.spinner {
+  display: inline-block; width: 13px; height: 13px; flex-shrink: 0;
+  border: 2px solid var(--admin-border, #ddd);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .assets-hint { font-size: 0.75rem; color: var(--admin-muted, #999); margin: 0; }
 

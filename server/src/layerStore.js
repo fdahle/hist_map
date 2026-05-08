@@ -240,6 +240,84 @@ export function metaToConfigLayer(meta, serverBaseUrl) {
   return { ...base, ...extras };
 }
 
+// ── Orphan scan ───────────────────────────────────────────────────────────────
+
+/**
+ * Scan for data that has been left behind:
+ *   - unreferencedLayers: directories on disk that are not in config.yaml and
+ *     not linked by any other layer's .links.json
+ *   - staleConfigRefs: _layerId entries in config.yaml whose directory is gone
+ *   - brokenLinks: .links.json references to layers that no longer exist on disk
+ */
+export async function scanOrphans(layersDir, configFilePath) {
+  const { default: yaml } = await import('js-yaml');
+
+  // All layers currently on disk
+  const allLayers = await listLayers(layersDir);
+  const diskIds   = new Set(allLayers.map(m => m.id));
+
+  // IDs referenced in config.yaml's data_layers[*]._layerId
+  let configIds = new Set();
+  try {
+    const raw  = await fs.readFile(configFilePath, 'utf8');
+    const cfg  = yaml.load(raw) ?? {};
+    for (const entry of (cfg.data_layers ?? [])) {
+      if (entry?._layerId) configIds.add(entry._layerId);
+    }
+  } catch { /* config missing or unreadable — treat as empty */ }
+
+  // IDs referenced by any layer's .links.json
+  const linkedIds = new Set();
+  const brokenLinksMap = new Map(); // ownerId → [{ type, targetId }]
+
+  let entries;
+  try { entries = await fs.readdir(layersDir, { withFileTypes: true }); } catch { entries = []; }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const linksPath = resolveInDir(layersDir, entry.name, `${entry.name}.links.json`);
+    let links;
+    try { links = JSON.parse(await fs.readFile(linksPath, 'utf8')); } catch { continue; }
+
+    const broken = [];
+    for (const cl of (links.csvLinks ?? [])) {
+      if (cl.dataLayerId) {
+        linkedIds.add(cl.dataLayerId);
+        if (!diskIds.has(cl.dataLayerId))
+          broken.push({ type: 'csvLink', targetId: cl.dataLayerId });
+      }
+    }
+    for (const fl of (links.featureLinks ?? [])) {
+      for (const id of (fl.modelLayerIds ?? [])) {
+        linkedIds.add(id);
+        if (!diskIds.has(id)) broken.push({ type: 'modelLink', targetId: id });
+      }
+      for (const id of (fl.pointcloudLayerIds ?? [])) {
+        linkedIds.add(id);
+        if (!diskIds.has(id)) broken.push({ type: 'pointcloudLink', targetId: id });
+      }
+    }
+    if (broken.length) brokenLinksMap.set(entry.name, broken);
+  }
+
+  const unreferencedLayers = allLayers.filter(
+    m => !configIds.has(m.id) && !linkedIds.has(m.id)
+  );
+
+  const staleConfigRefs = [];
+  for (const id of configIds) {
+    if (!diskIds.has(id)) staleConfigRefs.push(id);
+  }
+
+  const brokenLinks = [];
+  for (const [ownerId, refs] of brokenLinksMap) {
+    const ownerMeta = allLayers.find(m => m.id === ownerId);
+    brokenLinks.push({ ownerId, ownerName: ownerMeta?.layerConfig?.displayName ?? ownerId, refs });
+  }
+
+  return { unreferencedLayers, staleConfigRefs, brokenLinks };
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 export function validateLayerId(id) {

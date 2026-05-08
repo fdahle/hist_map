@@ -126,8 +126,8 @@ const TABS = [
   { id: '3d',       label: '3D Layers' },
   { id: 'data',     label: 'Data Layers' },
   { id: 'linking',  label: 'Linking'   },
-  { id: 'security', label: 'Security'  },
-  { id: 'debug',    label: 'Debug'     },
+  { id: 'security', label: 'Security' },
+  { id: 'debug',    label: 'Debug'    },
 ];
 
 const TAB_ICON_DEFS = {
