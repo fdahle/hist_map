@@ -40,7 +40,7 @@ See [DOCKER.md](DOCKER.md) for complete Docker documentation.
 ### Manual Setup
 
 #### Prerequisites
-- Node.js 18+
+- Node.js 20+
 #### Installation
 
 ```bash
@@ -291,4 +291,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - OpenLayers for 2D mapping
 - Three.js for 3D visualization
 - Vue.js for the frontend framework
-- GDAL, PDAL, and MeshLab for data processing tools
+- GDAL, PDAL, and untwine for data processing tools
