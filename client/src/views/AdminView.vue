@@ -229,12 +229,14 @@ function loadConfigIntoDraft(config) {
   d.osm_background_order = config.osm_background_order ?? 0;
   d.data_layers = config.data_layers ?? config.overlay_layers ?? d.data_layers;
   if (config.ui) {
-    d.ui.map_access      = config.ui.map_access      ?? true;
-    d.ui.map_download    = config.ui.map_download    ?? true;
-    d.ui.map_upload      = config.ui.map_upload      ?? true;
-    d.ui.viewer_access   = config.ui.viewer_access   ?? true;
-    d.ui.viewer_download = config.ui.viewer_download ?? true;
-    d.ui.viewer_upload   = config.ui.viewer_upload   ?? true;
+    d.ui.map_access            = config.ui.map_access            ?? true;
+    d.ui.map_download          = config.ui.map_download          ?? true;
+    d.ui.map_upload            = config.ui.map_upload            ?? true;
+    d.ui.viewer_access         = config.ui.viewer_access         ?? true;
+    d.ui.viewer_download       = config.ui.viewer_download       ?? true;
+    d.ui.viewer_upload         = config.ui.viewer_upload         ?? true;
+    d.ui.admin_download        = config.ui.admin_download        ?? true;
+    d.ui.download_conversions  = config.ui.download_conversions  ?? true;
   }
   draft.value = d;
 }

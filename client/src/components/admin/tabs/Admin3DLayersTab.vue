@@ -184,7 +184,7 @@
           </div>
 
           <div class="edit-footer">
-            <button v-if="layer.keepOriginal" class="btn-secondary-sm" @click="onDownloadOriginal(layer)">↓ Original</button>
+            <button v-if="layer.keepOriginal && (draft?.ui?.admin_download ?? true)" class="btn-secondary-sm" @click="onDownloadOriginal(layer)">↓ Original</button>
             <span class="edit-footer-spacer" />
             <span v-if="editError" class="edit-error">{{ editError }}</span>
             <span v-if="editSaving" class="edit-saving">Saving…</span>
@@ -204,6 +204,15 @@
       @cancel="cancelUpload"
     />
     <LayerInfoModal :layer="infoLayer" @close="infoLayer = null" />
+    <ConvertDownloadModal
+      :is-visible="convertModal.visible"
+      :title="convertModal.layer ? 'Download – ' + convertModal.layer.originalName : 'Download'"
+      :formats="convertModal.formats"
+      :loading="convertModal.loading"
+      :error="convertModal.error"
+      @confirm="onConvertConfirm"
+      @close="convertModal.visible = false; convertModal.error = ''"
+    />
   </section>
 </template>
 
@@ -212,15 +221,18 @@ import { ref, computed, inject, onMounted, onUnmounted, watch, nextTick } from '
 import { getApiUrl } from '../../../utils/config';
 import Asset3DUploadModal from '../../modals/admin/Asset3DUploadModal.vue';
 import LayerInfoModal from '../../modals/admin/LayerInfoModal.vue';
+import ConvertDownloadModal from '../../modals/ConvertDownloadModal.vue';
 
 // ── Injected from AdminView ────────────────────────────────────────────────────
 const authHeader = inject('authHeader');
+const draft      = inject('draft');
 
 function authHeaders(extra = {}) {
   return { Authorization: authHeader.value, ...extra };
 }
 
 // ── State ──────────────────────────────────────────────────────────────────────
+const convertModal       = ref({ visible: false, layer: null, formats: [], loading: false, error: '' });
 const layers             = ref([]);
 const isLoading          = ref(false);
 const uploadError        = ref('');
@@ -444,18 +456,54 @@ async function saveEdit(id) {
 }
 
 // ── Download original ──────────────────────────────────────────────────────────
-async function onDownloadOriginal(layer) {
+const ADMIN_FORMAT_MAP = {
+  geojson:    [
+    { label: 'GeoJSON',   ext: '.geojson', format: null,        desc: 'As stored' },
+    { label: 'Shapefile', ext: '.zip',     format: 'shapefile', desc: 'ESRI Shapefile (zipped)' },
+  ],
+  pointcloud: [
+    { label: 'COPC LAZ', ext: '.copc.laz', format: null,  desc: 'As stored' },
+    { label: 'LAZ',      ext: '.laz',      format: 'laz', desc: 'Compressed LAS' },
+    { label: 'LAS',      ext: '.las',      format: 'las', desc: 'Uncompressed point cloud' },
+    { label: 'PLY',      ext: '.ply',      format: 'ply', desc: 'Polygon file format' },
+  ],
+};
+
+function formatsForLayer(layer) {
+  const all = ADMIN_FORMAT_MAP[layer.fileType]
+    ?? [{ label: 'Original', ext: layer.extension ?? '', format: null, desc: 'As uploaded' }];
+  return (draft?.value?.ui?.download_conversions ?? true) ? all : all.filter(f => f.format === null);
+}
+
+function onDownloadOriginal(layer) {
+  convertModal.value = { visible: true, layer, formats: formatsForLayer(layer), loading: false, error: '' };
+}
+
+async function onConvertConfirm(opt) {
+  const layer = convertModal.value.layer;
+  convertModal.value.loading = true;
+  convertModal.value.error = '';
   try {
-    const res = await fetch(getApiUrl(`/admin/layers/${layer.id}/original`), { headers: authHeaders() });
-    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    const url = opt.format
+      ? getApiUrl(`/admin/layers/${layer.id}/convert?format=${encodeURIComponent(opt.format)}`)
+      : getApiUrl(`/admin/layers/${layer.id}/original`);
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error ?? `Download failed (${res.status})`);
+    }
     const blob = await res.blob();
+    const base = layer.originalName ? layer.originalName.replace(/\.[^.]+$/, '') : layer.id;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = layer.originalName ?? `${layer.id}.bin`;
+    a.download = `${base}${opt.ext}`;
     a.click();
     URL.revokeObjectURL(a.href);
+    convertModal.value.visible = false;
   } catch (err) {
-    editError.value = err.message;
+    convertModal.value.error = err.message;
+  } finally {
+    convertModal.value.loading = false;
   }
 }
 </script>

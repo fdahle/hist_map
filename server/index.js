@@ -192,6 +192,15 @@ const adminRateLimit = rateLimit({
   message: { error: 'Too many requests, please try again later.' },
 });
 
+// Strict rate limit for conversion downloads — CPU/disk-intensive operations.
+const conversionRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many conversion requests, please wait a moment.' },
+});
+
 // Apply rate limits to route groups before any route handler is registered.
 app.use('/admin', adminRateLimit);
 app.use(['/config', '/viewer', '/health', '/user'], generalRateLimit);
@@ -348,6 +357,43 @@ app.get('/map/access-status', async (req, res) => {
     res.json({ mapEnabled });
   } catch {
     res.json({ mapEnabled: true });
+  }
+});
+
+// Public GeoJSON → Shapefile conversion — no auth required (source data is already public)
+app.get('/layers/:id/convert', generalRateLimit, conversionRateLimit, async (req, res) => {
+  let tmpDir = null;
+  try {
+    const yamlText = await fs.readFile(configFilePath, 'utf8');
+    const cfg = yaml.load(yamlText, { schema: yaml.CORE_SCHEMA });
+    if (cfg?.ui?.map_download === false)          return res.status(403).json({ error: 'Downloads are disabled.' });
+    if (cfg?.ui?.download_conversions === false)  return res.status(403).json({ error: 'Format conversions are disabled.' });
+
+    const format = req.query.format;
+    if (format !== 'shapefile') return res.status(400).json({ error: 'Only shapefile conversion is available on public layers.' });
+
+    validateLayerId(req.params.id);
+    const meta = await readLayerMeta(layersDir, req.params.id);
+    if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Shapefile conversion is only available for GeoJSON layers.' });
+
+    const srcExt  = safeLayerExt(meta.extension);
+    const srcPath = resolveInDir(layersDir, req.params.id, `${req.params.id}${srcExt}`);
+    const baseName = path.parse(meta.originalName ?? req.params.id).name;
+
+    tmpDir = path.join(os.tmpdir(), `s3d-pub-convert-${crypto.randomUUID()}`);
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    const outZip = path.join(tmpDir, `${baseName}.zip`);
+    await new Promise((resolve, reject) => {
+      execFile('ogr2ogr', ['-f', 'ESRI Shapefile', `/vsizip/${outZip}`, srcPath], (err) => {
+        if (err) reject(new Error(`ogr2ogr failed: ${err.message}`));
+        else resolve();
+      });
+    });
+    res.download(outZip, `${baseName}.zip`, () => fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {}));
+  } catch (err) {
+    if (tmpDir) fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    return handleRouteError(res, err);
   }
 });
 
@@ -1329,15 +1375,68 @@ app.post('/admin/relink', requireAdminAuth, async (req, res) => {
 // Download the original file for a layer (if keepOriginal was set)
 app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
   try {
+    const yamlText = await fs.readFile(configFilePath, 'utf8');
+    const cfg = yaml.load(yamlText, { schema: yaml.CORE_SCHEMA });
+    if (cfg?.ui?.admin_download === false) return res.status(403).json({ error: 'Downloads are disabled.' });
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
     if (!meta.originalBackup) return res.status(404).json({ error: 'No original backup for this layer.' });
-        if (!/^[a-zA-Z0-9._-]+$/.test(meta.originalBackup)) {
+    if (!/^[a-zA-Z0-9._-]+$/.test(meta.originalBackup)) {
       return res.status(500).json({ error: 'Invalid backup filename in layer metadata.' });
     }
     const backupPath = resolveInDir(layersDir, req.params.id, path.basename(meta.originalBackup));
     res.download(backupPath, meta.originalName);
   } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// Convert and download a layer file in a different format
+const ALLOWED_CONVERT_FORMATS = new Set(['shapefile', 'laz', 'las', 'ply']);
+app.get('/admin/layers/:id/convert', requireAdminAuth, conversionRateLimit, async (req, res) => {
+  let tmpDir = null;
+  try {
+    const yamlText = await fs.readFile(configFilePath, 'utf8');
+    const cfg = yaml.load(yamlText, { schema: yaml.CORE_SCHEMA });
+    if (cfg?.ui?.admin_download === false) return res.status(403).json({ error: 'Downloads are disabled.' });
+    if (cfg?.ui?.download_conversions === false) return res.status(403).json({ error: 'Format conversions are disabled.' });
+
+    const format = req.query.format;
+    if (!ALLOWED_CONVERT_FORMATS.has(format)) return res.status(400).json({ error: `Unsupported format: ${format}` });
+
+    validateLayerId(req.params.id);
+    const meta = await readLayerMeta(layersDir, req.params.id);
+    const srcExt  = safeLayerExt(meta.extension);
+    const srcPath = resolveInDir(layersDir, req.params.id, `${req.params.id}${srcExt}`);
+    const baseName = path.parse(meta.originalName ?? req.params.id).name;
+
+    tmpDir = path.join(os.tmpdir(), `s3d-convert-${crypto.randomUUID()}`);
+    await fs.mkdir(tmpDir, { recursive: true });
+
+    if (format === 'shapefile') {
+      if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Shapefile conversion is only available for GeoJSON layers.' });
+      const outZip = path.join(tmpDir, `${baseName}.zip`);
+      await new Promise((resolve, reject) => {
+        execFile('ogr2ogr', ['-f', 'ESRI Shapefile', `/vsizip/${outZip}`, srcPath], (err) => {
+          if (err) reject(new Error(`ogr2ogr failed: ${err.message}`));
+          else resolve();
+        });
+      });
+      res.download(outZip, `${baseName}.zip`, () => fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {}));
+    } else {
+      // LAZ / LAS / PLY — PDAL translate
+      if (meta.fileType !== 'pointcloud') return res.status(400).json({ error: 'This conversion is only available for point cloud layers.' });
+      const outFile = path.join(tmpDir, `${baseName}.${format}`);
+      await new Promise((resolve, reject) => {
+        execFile('pdal', ['translate', srcPath, outFile], (err) => {
+          if (err) reject(new Error(`pdal failed: ${err.message}`));
+          else resolve();
+        });
+      });
+      res.download(outFile, `${baseName}.${format}`, () => fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {}));
+    }
+  } catch (err) {
+    if (tmpDir) fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     return handleRouteError(res, err);
   }
 });
@@ -1410,6 +1509,8 @@ ui:
   viewer_access: true
   viewer_download: true
   viewer_upload: true
+  admin_download: true
+  download_conversions: true
 `;
 
 try {

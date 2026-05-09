@@ -229,6 +229,15 @@
       :description="infoModalDescription"
       @close="infoModalVisible = false"
     />
+    <ConvertDownloadModal
+      :is-visible="downloadModal.visible"
+      :title="downloadModal.title"
+      :formats="downloadModal.formats"
+      :loading="downloadModal.loading"
+      :error="downloadModal.error"
+      @confirm="onDownloadConfirm"
+      @close="downloadModal.visible = false; downloadModal.error = ''"
+    />
   </div>
 </template>
 
@@ -240,7 +249,9 @@ import { useMapStore } from "../../stores/map/mapStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
 import LayerInfoModal from "../modals/LayerInfoModal.vue";
+import ConvertDownloadModal from "../modals/ConvertDownloadModal.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
+import { getApiUrl } from "@/utils/config.js";
 import { getGeometryIcon, ICON_EYE, ICON_EYE_OFF, ICON_CHEVRON_DOWN, ICON_CHEVRON_RIGHT, EMOJI_ICONS } from "../../constants/icons";
 import { STRINGS } from "../../constants/strings";
 
@@ -259,6 +270,8 @@ const infoModalVisible = ref(false);
 const infoModalTitle = ref('');
 const infoModalRows = ref([]);
 const infoModalDescription = ref(null);
+const appConfig = inject('config', ref(null));
+const downloadModal = ref({ visible: false, title: 'Download', formats: [], loading: false, error: '', _layer: null });
 
 const GEOM_LABELS = { point: 'Point', line: 'Line', polygon: 'Polygon', raster: 'Raster', unknown: 'Unknown' };
 const TYPE_LABELS = { geojson: 'GeoJSON', geotiff: 'GeoTIFF', wms: 'WMS', wmts: 'WMTS', tile: 'Tile' };
@@ -405,39 +418,62 @@ const handleMenuAction = ({ type, layer }) => {
 
   // --- DOWNLOAD ACTION (OpenLayers) ---
   if (type === "download") {
-    if (layer.type === 'geotiff') {
-      // For GeoTIFF layers, download the original file directly from its URL
-      const el = document.createElement("a");
-      el.setAttribute("href", layer.url);
-      el.setAttribute("download", `${layer.name}.tif`);
-      document.body.appendChild(el);
-      el.click();
-      el.remove();
-    } else {
-      const source = layer.layerInstance.getSource();
-      const features = source.getFeatures();
-
-      // Create GeoJSON writer
-      const format = new GeoJSON();
-
-      // Write features to object, transforming Projection -> Lat/Lon
-      const map = mapStore.getMap();
-      const projection = map.getView().getProjection();
-
-      const geojsonObj = format.writeFeaturesObject(features, {
-        dataProjection: 'EPSG:4326',
-        featureProjection: projection
-      });
-
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(geojsonObj));
-      const el = document.createElement("a");
-      el.setAttribute("href", dataStr);
-      el.setAttribute("download", `${layer.name}.json`);
-      document.body.appendChild(el);
-      el.click();
-      el.remove();
-    }
+    const conversionsOn = appConfig?.value?.ui?.download_conversions !== false;
+    const formats = layer.type === 'geotiff'
+      ? [{ label: 'GeoTIFF', ext: '.tif', format: null, desc: 'Current map layer' }]
+      : [
+          { label: 'GeoJSON', ext: '.geojson', format: null, desc: 'Loaded features' },
+          ...(conversionsOn ? [{ label: 'Shapefile', ext: '.zip', format: 'shapefile', desc: 'ESRI Shapefile (zipped)' }] : []),
+        ];
+    downloadModal.value = { visible: true, title: `Download – ${layer.name}`, formats, loading: false, error: '', _layer: layer };
   }
+};
+
+const onDownloadConfirm = async (opt) => {
+  const layer = downloadModal.value._layer;
+  if (!layer) return;
+
+  if (opt.format === 'shapefile') {
+    downloadModal.value.loading = true;
+    downloadModal.value.error = '';
+    try {
+      const res = await fetch(getApiUrl(`/layers/${layer._layerId}/convert?format=shapefile`));
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Conversion failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${layer.name}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      downloadModal.value.visible = false;
+    } catch (err) {
+      downloadModal.value.error = err.message;
+    } finally {
+      downloadModal.value.loading = false;
+    }
+    return;
+  }
+
+  // As-is download
+  if (layer.type === 'geotiff') {
+    const el = document.createElement('a');
+    el.href = layer.url;
+    el.download = `${layer.name}.tif`;
+    document.body.appendChild(el); el.click(); el.remove();
+  } else {
+    const source = layer.layerInstance.getSource();
+    const map = mapStore.getMap();
+    const projection = map.getView().getProjection();
+    const geojsonObj = new GeoJSON().writeFeaturesObject(source.getFeatures(), { dataProjection: 'EPSG:4326', featureProjection: projection });
+    const el = document.createElement('a');
+    el.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(geojsonObj));
+    el.download = `${layer.name}.geojson`;
+    document.body.appendChild(el); el.click(); el.remove();
+  }
+  downloadModal.value.visible = false;
 };
 
 const handleColorChange = ({ color, layer, subGroupValue }) => {

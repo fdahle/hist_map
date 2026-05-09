@@ -31,7 +31,7 @@
         <li @click="emitAction('info')"><span class="menu-icon" v-html="ICON_INFO_SM"></span> Layer Info</li>
         <li @click="emitAction('zoom')"><span class="menu-icon" v-html="ICON_ZOOM"></span> Zoom to Layer</li>
         <li @click="allowDownload && emitAction('download')" :class="{ 'menu-item-disabled': !allowDownload }">
-          <span class="menu-icon" v-html="ICON_DOWNLOAD"></span> {{ payload?.type === 'geotiff' ? 'Download TIF' : 'Download GeoJSON' }}
+          <span class="menu-icon" v-html="ICON_DOWNLOAD"></span> Download
         </li>
         <template v-if="payload?.type !== 'geotiff'">
           <li class="color-picker">

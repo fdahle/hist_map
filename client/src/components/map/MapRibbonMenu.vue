@@ -388,9 +388,9 @@
           <div class="ribbon-group-buttons">
             <button
               class="ribbon-btn"
-              @click="downloadLayer"
+              @click="openDownloadModal"
               :disabled="!allowDownload"
-              :title="selectedLayer.type === 'geotiff' ? 'Download TIF file' : 'Download as GeoJSON'"
+              title="Download layer"
             >
               <span class="btn-icon" v-html="ICON_DOWNLOAD"></span>
               <span class="btn-label">Download</span>
@@ -484,6 +484,17 @@
       :is-visible="exportErrorVisible"
       @close="exportErrorVisible = false"
     />
+
+    <!-- Convert / download modal -->
+    <ConvertDownloadModal
+      :is-visible="downloadModal.visible"
+      :title="downloadModal.title"
+      :formats="downloadModal.formats"
+      :loading="downloadModal.loading"
+      :error="downloadModal.error"
+      @confirm="onDownloadConfirm"
+      @close="downloadModal.visible = false; downloadModal.error = ''"
+    />
   </div>
 </template>
 
@@ -501,7 +512,9 @@ import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_VOLUME, ICON_3
 import { COLORMAPS } from '@/constants/colormaps.js';
 import LayerInfoModal from '../modals/LayerInfoModal.vue';
 import ExportErrorModal from '../modals/ExportErrorModal.vue';
+import ConvertDownloadModal from '../modals/ConvertDownloadModal.vue';
 import GeoJSON from 'ol/format/GeoJSON';
+import { getApiUrl } from '@/utils/config.js';
 
 defineProps({
   isMeasuringDistance: { type: Boolean, default: false },
@@ -562,6 +575,7 @@ const COLOR_PRESETS = ['#e63946', '#007bff', '#2a9d8f', '#e9c46a'];
 
 // ---- Export error modal ----
 const exportErrorVisible = ref(false);
+const downloadModal = ref({ visible: false, title: 'Download', formats: [], loading: false, error: '', _layer: null });
 
 // ---- Layer info modal ----
 const infoModalVisible = ref(false);
@@ -813,12 +827,61 @@ const showLayerInfo = () => {
   infoModalVisible.value = true;
 };
 
-const downloadLayer = async () => {
+function mapDownloadFormats(layer) {
+  const conversionsOn = appConfig?.value?.ui?.download_conversions !== false;
+  if (layer.type === 'geotiff') {
+    return [{ label: 'GeoTIFF', ext: '.tif', format: null, desc: 'Current map layer' }];
+  }
+  const base = [
+    { label: 'GeoJSON', ext: '.geojson', format: null, desc: 'Loaded features' },
+  ];
+  if (conversionsOn) base.push({ label: 'Shapefile', ext: '.zip', format: 'shapefile', desc: 'ESRI Shapefile (zipped)' });
+  return base;
+}
+
+const openDownloadModal = () => {
   const layer = selectedLayer.value;
   if (!layer?.layerInstance) return;
+  downloadModal.value = {
+    visible: true,
+    title: `Download – ${layer.name}`,
+    formats: mapDownloadFormats(layer),
+    loading: false,
+    error: '',
+    _layer: layer,
+  };
+};
+
+const onDownloadConfirm = async (opt) => {
+  const layer = downloadModal.value._layer;
+  if (!layer) return;
+
+  if (opt.format === 'shapefile') {
+    downloadModal.value.loading = true;
+    downloadModal.value.error = '';
+    try {
+      const res = await fetch(getApiUrl(`/layers/${layer._layerId}/convert?format=shapefile`));
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Conversion failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${layer.name}.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      downloadModal.value.visible = false;
+    } catch (err) {
+      downloadModal.value.error = err.message;
+    } finally {
+      downloadModal.value.loading = false;
+    }
+    return;
+  }
+
+  // As-is download
   if (layer.type === 'geotiff') {
-    // Fetch the file as a blob first so the download attribute works regardless
-    // of whether the URL is cross-origin (blob: and data: URLs are always same-origin).
     try {
       const resp = await fetch(layer.url);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -830,7 +893,6 @@ const downloadLayer = async () => {
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
     } catch {
-      // Fallback: open in new tab
       window.open(layer.url, '_blank');
     }
   } else {
@@ -842,9 +904,10 @@ const downloadLayer = async () => {
     const obj = fmt.writeFeaturesObject(source.getFeatures(), { dataProjection: 'EPSG:4326', featureProjection: projection });
     const a = document.createElement('a');
     a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(obj));
-    a.download = `${layer.name}.json`;
+    a.download = `${layer.name}.geojson`;
     document.body.appendChild(a); a.click(); a.remove();
   }
+  downloadModal.value.visible = false;
 };
 
 const changeLayerColor = (color) => {

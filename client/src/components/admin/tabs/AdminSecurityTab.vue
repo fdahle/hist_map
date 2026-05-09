@@ -137,6 +137,30 @@
             <label for="flag-viewer-upload" class="slider"></label>
           </div>
         </div>
+
+        <hr class="flag-divider" />
+
+        <div class="flag-row">
+          <div class="flag-info">
+            <span class="flag-label">Admin file download</span>
+            <span class="flag-desc">Allow admin users to download stored layer files</span>
+          </div>
+          <div class="toggle-switch">
+            <input id="flag-admin-download" v-model="draft.ui.admin_download" type="checkbox" @change="scheduleSave" />
+            <label for="flag-admin-download" class="slider"></label>
+          </div>
+        </div>
+
+        <div class="flag-row">
+          <div class="flag-info">
+            <span class="flag-label">Format conversions on download</span>
+            <span class="flag-desc">Allow converting files to other formats when downloading (e.g. GeoJSON → Shapefile, LAS → PLY)</span>
+          </div>
+          <div class="toggle-switch">
+            <input id="flag-download-conversions" v-model="draft.ui.download_conversions" type="checkbox" @change="scheduleSave" :disabled="!draft.ui.admin_download" />
+            <label for="flag-download-conversions" class="slider"></label>
+          </div>
+        </div>
       </div>
     </div>
   </section>
