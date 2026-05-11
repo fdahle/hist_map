@@ -17,6 +17,6 @@ HTMLCanvasElement.prototype.getContext = function (type, attributes) {
 const app = createApp(App)
 
 app.use(createPinia())
-app.use(router) // <--- Use it
-
+app.use(router)
+await router.isReady()
 app.mount('#app')

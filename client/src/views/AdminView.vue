@@ -185,6 +185,36 @@ const storePassword      = (pwd) => { _storedPassword.value = pwd; };
 const getStoredPassword  = ()    => _storedPassword.value;
 const clearStoredPassword = ()   => { _storedPassword.value = ''; };
 
+// Encrypt the password with AES-GCM before writing to localStorage.
+// The decryption key lives only in sessionStorage (tab-scoped, never written to disk),
+// so even a full copy of localStorage cannot be decrypted after the session ends.
+const _b64enc = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const _b64dec = (s)   => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function encryptPwd(pwd) {
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  const iv  = crypto.getRandomValues(new Uint8Array(12));
+  const enc = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(pwd));
+  sessionStorage.setItem('admin_k',       _b64enc(await crypto.subtle.exportKey('raw', key)));
+  localStorage.setItem('admin_pwd_enc',   _b64enc(enc));
+  localStorage.setItem('admin_pwd_iv',    _b64enc(iv));
+}
+async function decryptPwd() {
+  const k = sessionStorage.getItem('admin_k');
+  const e = localStorage.getItem('admin_pwd_enc');
+  const v = localStorage.getItem('admin_pwd_iv');
+  if (!k || !e || !v) return null;
+  try {
+    const key = await crypto.subtle.importKey('raw', _b64dec(k), { name: 'AES-GCM' }, false, ['decrypt']);
+    return new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: _b64dec(v) }, key, _b64dec(e)));
+  } catch { return null; }
+}
+function clearPwdStorage() {
+  sessionStorage.removeItem('admin_k');
+  localStorage.removeItem('admin_pwd_enc');
+  localStorage.removeItem('admin_pwd_iv');
+  localStorage.removeItem('admin_pwd');
+}
+
 function buildAuthHeader(pwd) {
   return 'Basic ' + btoa('admin:' + pwd);
 }
@@ -363,8 +393,8 @@ async function attemptLogin() {
     loadedCrs.value         = config ? (config.crs ?? null) : null;
     hasExistingConfig.value = config !== null;
     storePassword(password.value);
-    if (keepSignedIn.value) localStorage.setItem('admin_pwd', password.value);
-    else localStorage.removeItem('admin_pwd');
+    if (keepSignedIn.value) await encryptPwd(password.value);
+    else clearPwdStorage();
     isAuthenticated.value   = true;
     resetSessionTimer();
   } catch (err) {
@@ -379,7 +409,7 @@ async function attemptLogin() {
 
 function logout() {
   clearStoredPassword();
-  localStorage.removeItem('admin_pwd');
+  clearPwdStorage();
   clearTimeout(_sessionTimeoutId);
   isAuthenticated.value = false;
   osmBackground.value = true;
@@ -422,7 +452,7 @@ onMounted(async () => {
   } catch { /* fall through to login form */ }
 
   if (!isFirstRun.value && !isAuthenticated.value) {
-    const saved = localStorage.getItem('admin_pwd');
+    const saved = await decryptPwd();
     if (saved) {
       try {
         await verifyPassword(saved);
@@ -434,7 +464,7 @@ onMounted(async () => {
         isAuthenticated.value   = true;
         resetSessionTimer();
       } catch {
-        localStorage.removeItem('admin_pwd');
+        clearPwdStorage();
       }
     }
   }

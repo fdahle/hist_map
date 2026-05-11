@@ -268,6 +268,8 @@ const authHeader        = inject('authHeader');
 const getStoredPassword = inject('getStoredPassword');
 const buildAuthHeader   = inject('buildAuthHeader');
 const logout            = inject('logout');
+const draft             = inject('draft');
+const scheduleSave      = inject('scheduleSave');
 function authHeaders() { return { Authorization: authHeader.value }; }
 
 // ── Libraries ──────────────────────────────────────────────────────────────────
@@ -483,7 +485,7 @@ async function resetConfig() {
       throw new Error(body.error || `Server error: ${res.status}`);
     }
     logout();
-    window.location.href = '/admin';
+    window.location.reload();
   } catch (err) {
     dangerError.value   = err.message;
     resetConfirming.value = false;
@@ -503,6 +505,8 @@ async function deleteAllFiles() {
       fetch(getApiUrl(`/admin/layers/${l.id}`), { method: 'DELETE', headers: authHeaders() })
     ));
     allLayers.value = [];
+    draft.value.data_layers = [];
+    scheduleSave();
     deleteFilesConfirming.value = false;
   } catch (err) {
     dangerError.value = err.message;

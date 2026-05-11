@@ -317,7 +317,7 @@ const props = defineProps({
 
 const emit = defineEmits(['save', 'cancel']);
 
-const uid = Math.random().toString(36).slice(2, 8);
+const uid = crypto.randomUUID().slice(0, 8);
 
 const BASE_TYPES    = ['tile', 'wmts', 'wms'];
 const OVERLAY_TYPES = ['geojson', 'geotiff'];

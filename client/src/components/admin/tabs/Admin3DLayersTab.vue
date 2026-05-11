@@ -28,10 +28,8 @@
       <button class="banner-close" @click="uploadError = ''">✕</button>
     </div>
 
-    <div v-if="isLoading && !layers.length" class="empty-state">Loading 3D layers…</div>
-    <div v-else-if="!isLoading && !layers.length && !uploadPlaceholders.length" class="empty-state">
-      No 3D layers yet. Click <strong>Add 3D Layer</strong> to upload an OBJ, PLY, STL, LAS, or LAZ file.
-    </div>
+    <div v-if="isLoading && !sortedLayers.length" class="empty-state">Loading 3D layers…</div>
+    <div v-else-if="!isLoading && !sortedLayers.length && !uploadPlaceholders.length" class="empty-state">No 3D layers uploaded yet.</div>
 
     <!-- Upload placeholder cards -->
     <div v-if="uploadPlaceholders.length" class="layer-list" style="margin-bottom: 0.5rem;">
@@ -534,7 +532,7 @@ async function onConvertConfirm(opt) {
 }
 .banner-close { background: none; border: none; cursor: pointer; color: var(--admin-muted, #777); font-size: 1rem; padding: 0; }
 
-.empty-state { padding: 1.25rem; text-align: center; font-size: 0.85rem; color: var(--admin-muted, #777); background: var(--admin-bg, #f3f4f6); border-radius: 6px; }
+.empty-state { padding: 0.5rem 0; font-size: 0.85rem; color: var(--admin-muted, #888); }
 .layer-list { display: flex; flex-direction: column; gap: 0.5rem; }
 
 .layer-card {

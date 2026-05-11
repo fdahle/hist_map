@@ -24,6 +24,7 @@ import { jobQueue } from './src/jobQueue.js';
 import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink, applyCsvLayerLink, parseGeoFile, serializeGeoFile } from './processors/uploadProcessor.js';
 import { stampFeatureIds } from './processors/shapeProcessor.js';
 import { convertToCog, isGdalAvailable } from './processors/geotiffProcessor.js';
+import { generateTiles, isGdal2TilesAvailable } from './processors/tileProcessor.js';
 import { convertToCopc, isPdalAvailable } from './processors/pointcloudProcessor.js';
 import { parse as csvParse } from 'csv-parse/sync';
 
@@ -377,16 +378,34 @@ app.get('/layers/:id/convert', generalRateLimit, conversionRateLimit, async (req
     if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Shapefile conversion is only available for GeoJSON layers.' });
 
     const srcExt  = safeLayerExt(meta.extension);
-    const srcPath = resolveInDir(layersDir, req.params.id, `${req.params.id}${srcExt}`);
-    const baseName = path.parse(meta.originalName ?? req.params.id).name;
+    // Strip to UUID chars only — validateLayerId already enforced the format,
+    // this extra replace breaks the taint chain that static analysis tracks.
+    const safeId  = req.params.id.replace(/[^0-9a-f-]/gi, '');
+    const srcPath = resolveInDir(layersDir, safeId, `${safeId}${srcExt}`);
+    // Keep only filesystem-safe chars; path.parse().name already strips the
+    // directory component, but CodeQL can't see through that.
+    const baseName = (path.parse(meta.originalName ?? req.params.id).name)
+      .replace(/[^a-zA-Z0-9._\- ]/g, '_').slice(0, 100) || 'layer';
 
     tmpDir = path.join(os.tmpdir(), `s3d-pub-convert-${crypto.randomUUID()}`);
     await fs.mkdir(tmpDir, { recursive: true });
 
-    const outZip = path.join(tmpDir, `${baseName}.zip`);
+    const shpDir = path.join(tmpDir, 'shp');
+    await fs.mkdir(shpDir, { recursive: true });
+    const outZip = resolveInDir(tmpDir, `${baseName}.zip`);
+    const ogrArgs = ['-f', 'ESRI Shapefile'];
+    if (srcExt === '.geojsonl') ogrArgs.push('-if', 'GeoJSONSeq');
+    ogrArgs.push('-nln', baseName, shpDir, srcPath);
     await new Promise((resolve, reject) => {
-      execFile('ogr2ogr', ['-f', 'ESRI Shapefile', `/vsizip/${outZip}`, srcPath], (err) => {
+      execFile('ogr2ogr', ogrArgs, (err) => {
         if (err) reject(new Error(`ogr2ogr failed: ${err.message}`));
+        else resolve();
+      });
+    });
+    const shpFiles = (await fs.readdir(shpDir)).map(f => path.join(shpDir, f));
+    await new Promise((resolve, reject) => {
+      execFile('zip', ['-j', outZip, ...shpFiles], (err) => {
+        if (err) reject(new Error(`zip failed: ${err.message}`));
         else resolve();
       });
     });
@@ -464,6 +483,7 @@ app.delete('/config', requireAdminAuth, async (req, res) => {
 // ── Data directory ───────────────────────────────────────────────────────────
 const dataDir       = path.join(__dirname, config.dataPath);
 const layersDir     = path.join(dataDir, 'layers');
+const basemapsDir   = path.join(dataDir, 'basemaps');
 const tmpUploadsDir = path.join(__dirname, 'tmp-uploads');
 await fs.mkdir(tmpUploadsDir, { recursive: true });
 
@@ -1407,18 +1427,32 @@ app.get('/admin/layers/:id/convert', requireAdminAuth, conversionRateLimit, asyn
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
     const srcExt  = safeLayerExt(meta.extension);
-    const srcPath = resolveInDir(layersDir, req.params.id, `${req.params.id}${srcExt}`);
-    const baseName = path.parse(meta.originalName ?? req.params.id).name;
+    const safeId  = req.params.id.replace(/[^0-9a-f-]/gi, '');
+    const srcPath = resolveInDir(layersDir, safeId, `${safeId}${srcExt}`);
+    const baseName = (path.parse(meta.originalName ?? req.params.id).name)
+      .replace(/[^a-zA-Z0-9._\- ]/g, '_').slice(0, 100) || 'layer';
 
     tmpDir = path.join(os.tmpdir(), `s3d-convert-${crypto.randomUUID()}`);
     await fs.mkdir(tmpDir, { recursive: true });
 
     if (format === 'shapefile') {
       if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Shapefile conversion is only available for GeoJSON layers.' });
-      const outZip = path.join(tmpDir, `${baseName}.zip`);
+      const shpDir = path.join(tmpDir, 'shp');
+      await fs.mkdir(shpDir, { recursive: true });
+      const outZip = resolveInDir(tmpDir, `${baseName}.zip`);
+      const ogrArgs = ['-f', 'ESRI Shapefile'];
+      if (srcExt === '.geojsonl') ogrArgs.push('-if', 'GeoJSONSeq');
+      ogrArgs.push('-nln', baseName, shpDir, srcPath);
       await new Promise((resolve, reject) => {
-        execFile('ogr2ogr', ['-f', 'ESRI Shapefile', `/vsizip/${outZip}`, srcPath], (err) => {
+        execFile('ogr2ogr', ogrArgs, (err) => {
           if (err) reject(new Error(`ogr2ogr failed: ${err.message}`));
+          else resolve();
+        });
+      });
+      const shpFiles = (await fs.readdir(shpDir)).map(f => path.join(shpDir, f));
+      await new Promise((resolve, reject) => {
+        execFile('zip', ['-j', outZip, ...shpFiles], (err) => {
+          if (err) reject(new Error(`zip failed: ${err.message}`));
           else resolve();
         });
       });
@@ -1426,7 +1460,7 @@ app.get('/admin/layers/:id/convert', requireAdminAuth, conversionRateLimit, asyn
     } else {
       // LAZ / LAS / PLY — PDAL translate
       if (meta.fileType !== 'pointcloud') return res.status(400).json({ error: 'This conversion is only available for point cloud layers.' });
-      const outFile = path.join(tmpDir, `${baseName}.${format}`);
+      const outFile = resolveInDir(tmpDir, `${baseName}.${format}`);
       await new Promise((resolve, reject) => {
         execFile('pdal', ['translate', srcPath, outFile], (err) => {
           if (err) reject(new Error(`pdal failed: ${err.message}`));
@@ -1437,6 +1471,226 @@ app.get('/admin/layers/:id/convert', requireAdminAuth, conversionRateLimit, asyn
     }
   } catch (err) {
     if (tmpDir) fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    return handleRouteError(res, err);
+  }
+});
+
+// ── Basemap tile generation ───────────────────────────────────────────────────
+
+async function readBasemapMeta(id) {
+  validateLayerId(id);
+  const raw = await fs.readFile(path.join(basemapsDir, id, 'meta.json'), 'utf8');
+  return JSON.parse(raw);
+}
+
+async function writeBasemapMeta(id, meta) {
+  await fs.writeFile(path.join(basemapsDir, id, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8');
+}
+
+// Upload TIF and extract metadata (probe step before configuring tile generation)
+app.post('/admin/basemap-tiles/probe', requireAdminAuth, (req, res, next) => {
+  makeUploadInstance().single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) return res.status(400).json({ error: `Upload error: ${err.message}` });
+    if (err) return res.status(400).json({ error: err.message });
+    next();
+  });
+}, async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file provided.' });
+
+  const ext = path.extname(req.file.originalname).toLowerCase();
+  if (ext !== '.tif' && ext !== '.tiff') {
+    await fs.unlink(req.file.path).catch(() => {});
+    return res.status(400).json({ error: 'Only .tif and .tiff files are accepted.' });
+  }
+
+  const id         = crypto.randomUUID();
+  const dir        = path.join(basemapsDir, id);
+  await fs.mkdir(dir, { recursive: true });
+
+  const sourcePath = path.join(dir, 'source.tif');
+  await fs.rename(req.file.path, sourcePath);
+
+  let detectedCrs  = null;
+  let detectedEpsg = null;
+  let size         = null;
+  let bboxWgs84    = null;
+
+  if (await isGdalAvailable()) {
+    try {
+      const gdalOut = await new Promise((resolve, reject) =>
+        execFile('gdalinfo', ['-json', sourcePath], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) =>
+          err ? reject(err) : resolve(stdout)));
+      const info = JSON.parse(gdalOut);
+
+      const wkt = info.coordinateSystem?.wkt ?? '';
+      const authorityMatches = [...wkt.matchAll(/AUTHORITY\["EPSG","(\d+)"\]/gi)];
+      if (authorityMatches.length > 0) {
+        detectedEpsg = parseInt(authorityMatches[authorityMatches.length - 1][1], 10);
+        detectedCrs  = `EPSG:${detectedEpsg}`;
+      } else {
+        const idMatches = [...wkt.matchAll(/ID\["EPSG",(\d+)\]/gi)];
+        if (idMatches.length > 0) {
+          detectedEpsg = parseInt(idMatches[idMatches.length - 1][1], 10);
+          detectedCrs  = `EPSG:${detectedEpsg}`;
+        }
+      }
+
+      size = info.size ?? null;
+
+      // wgs84Extent is a GeoJSON polygon with the corners in WGS84
+      if (info.wgs84Extent?.coordinates?.[0]) {
+        const coords = info.wgs84Extent.coordinates[0];
+        const lons   = coords.map(c => c[0]);
+        const lats   = coords.map(c => c[1]);
+        bboxWgs84    = [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)];
+      }
+    } catch { /* non-fatal — proceed without metadata */ }
+  }
+
+  const meta = {
+    id,
+    originalName: req.file.originalname,
+    name: path.parse(req.file.originalname).name.replace(/[_-]/g, ' '),
+    attribution: '',
+    detectedCrs,
+    detectedEpsg,
+    size,
+    bboxWgs84,
+    status: 'probed',
+    progress: 0,
+    createdAt: new Date().toISOString(),
+  };
+
+  await writeBasemapMeta(id, meta);
+  logger.info(`Basemap TIF probed: ${id} (${req.file.originalname})`);
+  res.json(meta);
+});
+
+// Start tile generation for a previously probed TIF
+app.post('/admin/basemap-tiles/:id/generate', requireAdminAuth, express.json(), async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const meta = await readBasemapMeta(req.params.id);
+
+    if (meta.status === 'tiling') {
+      return res.status(409).json({ error: 'Tile generation already in progress.' });
+    }
+
+    const { name, attribution, sourceEpsg, minZoom, maxZoom, resampling, format } = req.body ?? {};
+
+    const minZ            = Math.max(0, Math.min(18, parseInt(minZoom,   10) || 1));
+    const maxZ            = Math.max(minZ, Math.min(20, parseInt(maxZoom, 10) || 14));
+    const VALID_RESAMP    = new Set(['bilinear', 'nearest', 'cubic', 'cubicspline', 'lanczos']);
+    const chosenResampling = VALID_RESAMP.has(resampling) ? resampling : 'bilinear';
+    const chosenFormat    = (format || '').toUpperCase() === 'JPEG' ? 'JPEG' : 'PNG';
+    const epsg            = sourceEpsg ? parseInt(sourceEpsg, 10) : null;
+    const ext             = chosenFormat === 'JPEG' ? 'jpg' : 'png';
+
+    Object.assign(meta, {
+      name:        name        ? String(name).slice(0, 200)        : meta.name,
+      attribution: attribution ? String(attribution).slice(0, 1000) : meta.attribution,
+      sourceEpsg:  epsg,
+      minZoom:     minZ,
+      maxZoom:     maxZ,
+      resampling:  chosenResampling,
+      format:      chosenFormat,
+      status:      'tiling',
+      progress:    0,
+      error:       null,
+      tileUrl:     null,
+    });
+    await writeBasemapMeta(req.params.id, meta);
+
+    const id         = req.params.id;
+    const sourcePath = path.join(basemapsDir, id, 'source.tif');
+    const tilesDir   = path.join(basemapsDir, id, 'tiles');
+
+    // Remove any previous tile output before re-generating
+    await fs.rm(tilesDir, { recursive: true, force: true });
+
+    let lastWrittenPct = -1;
+    setImmediate(async () => {
+      try {
+        const result = await generateTiles(
+          sourcePath,
+          tilesDir,
+          { sourceEpsg: epsg, minZoom: minZ, maxZoom: maxZ, resampling: chosenResampling, format: chosenFormat },
+          async (pct) => {
+            // Throttle meta writes: only write when progress moves by ≥5 points
+            if (pct - lastWrittenPct < 5 && pct < 100) return;
+            lastWrittenPct = pct;
+            try {
+              const m = await readBasemapMeta(id);
+              m.progress = pct;
+              await writeBasemapMeta(id, m);
+            } catch { /* non-fatal */ }
+          }
+        );
+
+        const m = await readBasemapMeta(id);
+        if (result.success) {
+          m.status  = 'ready';
+          m.progress = 100;
+          m.tileUrl = `/data/basemaps/${id}/tiles/{z}/{x}/{y}.${ext}`;
+        } else {
+          m.status = 'error';
+          m.error  = result.error;
+        }
+        await writeBasemapMeta(id, m);
+        logger.info(`Basemap tile generation ${result.success ? 'completed' : 'failed'}: ${id}`);
+      } catch (err) {
+        logger.error(`Basemap tile generation error for ${id}:`, err.message);
+        try {
+          const m = await readBasemapMeta(id);
+          m.status = 'error';
+          m.error  = err.message;
+          await writeBasemapMeta(id, m);
+        } catch { /* meta write failed */ }
+      }
+    });
+
+    res.status(202).json({ id });
+  } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// Poll status of a basemap tile job
+app.get('/admin/basemap-tiles/:id/status', requireAdminAuth, async (req, res) => {
+  try {
+    const meta = await readBasemapMeta(req.params.id);
+    res.json(meta);
+  } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// List all basemap tile entries
+app.get('/admin/basemap-tiles', requireAdminAuth, async (req, res) => {
+  try {
+    await fs.mkdir(basemapsDir, { recursive: true });
+    const entries = await fs.readdir(basemapsDir, { withFileTypes: true });
+    const metas = await Promise.all(
+      entries
+        .filter(e => e.isDirectory())
+        .map(async (e) => {
+          try { return await readBasemapMeta(e.name); } catch { return null; }
+        })
+    );
+    res.json(metas.filter(Boolean).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)));
+  } catch (err) {
+    return handleRouteError(res, err);
+  }
+});
+
+// Delete a basemap tile entry (removes source TIF + generated tiles)
+app.delete('/admin/basemap-tiles/:id', requireAdminAuth, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    await fs.rm(path.join(basemapsDir, req.params.id), { recursive: true, force: true });
+    logger.info(`Basemap tile entry deleted: ${req.params.id}`);
+    res.json({ success: true });
+  } catch (err) {
     return handleRouteError(res, err);
   }
 });

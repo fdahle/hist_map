@@ -46,13 +46,16 @@ import {
 // clean up those files without loading them into Node.js memory.
 
 async function moveTemp(srcPath, destPath) {
+  // Resolve both paths to normalise any traversal sequences before touching disk.
+  const src  = path.resolve(srcPath);
+  const dest = path.resolve(destPath);
   try {
-    await fs.rename(srcPath, destPath);
+    await fs.rename(src, dest);
   } catch (err) {
     if (err.code === 'EXDEV') {
       // Cross-device link — fall back to copy + delete
-      await fs.copyFile(srcPath, destPath);
-      await fs.unlink(srcPath).catch(() => {});
+      await fs.copyFile(src, dest);
+      await fs.unlink(src).catch(() => {});
     } else throw err;
   }
 }
@@ -114,9 +117,10 @@ function countModelElements(buffer, ext) {
         faces:    faceMatch ? parseInt(faceMatch[1], 10) : null,
       };
     }
-    if (ext === '.obj') {
+    if (ext === '.obj' && Buffer.isBuffer(buffer)) {
       let vertices = 0, faces = 0, lineStart = true;
-      for (let i = 0; i < buffer.length; i++) {
+      const len = buffer.length;
+      for (let i = 0; i < len; i++) {
         const b = buffer[i];
         if (lineStart) {
           const next = buffer[i + 1];

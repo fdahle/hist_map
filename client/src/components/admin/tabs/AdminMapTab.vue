@@ -85,7 +85,10 @@
           <h3 class="card-title card-title-inline">Basemaps</h3>
           <p class="card-desc">Tile, WMS, or WMTS layers shown in the base layer switcher. Drag handle to reorder — the top entry is shown first.</p>
         </div>
-        <button class="btn-add-sm" @click="openAddBasemap">+ Add Basemap</button>
+        <div class="btn-group">
+          <button class="btn-add-sm" @click="openAddBasemap">+ Add Basemap</button>
+          <button class="btn-add-sm btn-add-sm-outline" @click="showTifUpload = true">+ Upload TIF</button>
+        </div>
       </div>
 
       <div v-if="noBackgroundWarning" class="warn-list">
@@ -170,12 +173,88 @@
       @save="onLayerModalSave"
       @cancel="layerModalOpen = false"
     />
+
+    <!-- ── TIF Tile Jobs ─────────────────────────────────────────────── -->
+    <div v-if="tileJobs.length" class="settings-card">
+      <div class="card-header">
+        <div>
+          <h3 class="card-title card-title-inline">TIF Tile Conversions</h3>
+          <p class="card-desc">GeoTIFFs being converted to tile pyramids. Add completed ones as basemaps.</p>
+        </div>
+      </div>
+      <div class="layer-list">
+        <div
+          v-for="job in tileJobs" :key="job.id"
+          class="layer-row tile-job-row"
+          :class="{
+            'tile-job-tiling': job.status === 'tiling',
+            'tile-job-ready':  job.status === 'ready',
+            'tile-job-error':  job.status === 'error',
+          }"
+        >
+          <!-- Status badge -->
+          <span class="type-badge" :class="`type-${job.status}`">
+            {{ job.status === 'tiling' ? 'tiling' : job.status === 'ready' ? 'ready' : job.status === 'error' ? 'error' : 'pending' }}
+          </span>
+
+          <!-- Info -->
+          <div class="layer-info">
+            <span class="layer-name">{{ job.name || job.originalName }}</span>
+            <span class="layer-url">
+              <template v-if="job.status === 'tiling'">zoom {{ job.minZoom }}–{{ job.maxZoom }} · {{ job.format }} · {{ job.progress }}%</template>
+              <template v-else-if="job.status === 'ready'">{{ job.tileUrl }}</template>
+              <template v-else-if="job.status === 'error'">{{ job.error }}</template>
+              <template v-else>Pending configuration</template>
+            </span>
+
+            <!-- Inline progress bar for tiling jobs -->
+            <div v-if="job.status === 'tiling'" class="tile-progress-track">
+              <div class="tile-progress-fill" :style="{ width: job.progress + '%' }" />
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="row-actions">
+            <button
+              v-if="job.status === 'ready' && !isAlreadyAdded(job)"
+              class="btn-add-sm btn-add-sm-sm"
+              title="Add to basemaps"
+              @click="addJobAsBasemap(job)"
+            >
+              + Add
+            </button>
+            <span v-if="job.status === 'ready' && isAlreadyAdded(job)" class="added-tag">Added</span>
+            <button
+              class="action-btn action-btn-danger"
+              title="Delete"
+              :disabled="deletingJob[job.id]"
+              @click="deleteJob(job.id)"
+            >
+              <svg v-if="!deletingJob[job.id]" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+                <path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
+              </svg>
+              <span v-else style="font-size:10px">…</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TIF upload modal -->
+    <BasemapTifUploadModal
+      :is-open="showTifUpload"
+      :auth-header="authHeader"
+      @close="showTifUpload = false"
+      @added="onTifBasemapAdded"
+    />
   </section>
 </template>
 
 <script setup>
-import { ref, computed, inject, watch } from 'vue';
-import LayerEditorModal from '../../modals/admin/LayerEditorModal.vue';
+import { ref, computed, inject, watch, onMounted, onBeforeUnmount } from 'vue';
+import LayerEditorModal        from '../../modals/admin/LayerEditorModal.vue';
+import BasemapTifUploadModal   from '../../modals/admin/BasemapTifUploadModal.vue';
 
 // ── Injected from AdminView ────────────────────────────────────────────────────
 const draft         = inject('draft');
@@ -321,6 +400,75 @@ function onLayerModalSave(layer) {
   layerModalOpen.value = false;
 }
 
+// ── TIF tile jobs ──────────────────────────────────────────────────────────────
+const showTifUpload = ref(false);
+const tileJobs      = ref([]);
+const deletingJob   = ref({});
+let   jobPollTimer  = null;
+
+async function fetchTileJobs() {
+  try {
+    const res  = await fetch('/admin/basemap-tiles', { headers: { Authorization: authHeader.value } });
+    if (!res.ok) return;
+    tileJobs.value = await res.json();
+  } catch { /* ignore */ }
+}
+
+function scheduleTileJobPoll() {
+  clearInterval(jobPollTimer);
+  const hasActive = tileJobs.value.some(j => j.status === 'tiling');
+  jobPollTimer = setInterval(async () => {
+    await fetchTileJobs();
+    if (!tileJobs.value.some(j => j.status === 'tiling')) {
+      clearInterval(jobPollTimer);
+    }
+  }, hasActive ? 2000 : 10_000);
+}
+
+function isAlreadyAdded(job) {
+  return (draft.value.basemaps ?? []).some(b => b.url === job.tileUrl);
+}
+
+function addJobAsBasemap(job) {
+  const entry = {
+    name:        job.name || job.originalName,
+    type:        'tile',
+    url:         job.tileUrl,
+    attribution: job.attribution || '',
+    visible:     false,
+    order:       (draft.value.basemaps?.length ?? 0),
+    tileSize:    256,
+  };
+  draft.value.basemaps = [...(draft.value.basemaps ?? []), entry];
+  scheduleSave();
+}
+
+async function deleteJob(id) {
+  deletingJob.value[id] = true;
+  try {
+    await fetch(`/admin/basemap-tiles/${id}`, {
+      method: 'DELETE', headers: { Authorization: authHeader.value },
+    });
+    tileJobs.value = tileJobs.value.filter(j => j.id !== id);
+  } catch { /* ignore */ } finally {
+    delete deletingJob.value[id];
+  }
+}
+
+function onTifBasemapAdded(entry, jobId) {
+  draft.value.basemaps = [...(draft.value.basemaps ?? []), entry];
+  scheduleSave();
+  // Refresh jobs list so the new entry shows "Added"
+  fetchTileJobs();
+}
+
+onMounted(async () => {
+  await fetchTileJobs();
+  scheduleTileJobPoll();
+});
+
+onBeforeUnmount(() => clearInterval(jobPollTimer));
+
 // ── URL display helper ─────────────────────────────────────────────────────────
 function truncateUrl(url) {
   if (!url) return '';
@@ -449,4 +597,36 @@ input:checked + .slider::after { transform: translateX(16px); }
 }
 .action-btn:hover { color: var(--admin-text, #1a1a1a); border-color: var(--admin-muted, #999); }
 .action-btn-danger:hover { color: #ef4444; border-color: #fca5a5; }
+
+.btn-group { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+
+.btn-add-sm-outline {
+  background: transparent; color: #3b82f6;
+  border: 1px solid #3b82f6;
+}
+.btn-add-sm-outline:hover { background: rgba(59,130,246,0.08); }
+
+.btn-add-sm-sm { padding: 0.2rem 0.55rem; font-size: 0.73rem; }
+
+/* Tile job rows */
+.tile-job-row   { flex-wrap: wrap; gap: 0.4rem; align-items: flex-start; }
+.tile-job-tiling { border-left: 3px solid #3b82f6; }
+.tile-job-ready  { border-left: 3px solid #22c55e; }
+.tile-job-error  { border-left: 3px solid #ef4444; }
+
+.type-tiling  { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.type-ready   { background: rgba(34,197,94,0.15);  color: #16a34a; }
+.type-error   { background: rgba(239,68,68,0.15);  color: #dc2626; }
+.type-probed  { background: rgba(156,163,175,0.2); color: #6b7280; }
+
+.tile-progress-track {
+  height: 4px; border-radius: 2px; background: var(--admin-border, #e0e0e0);
+  overflow: hidden; margin-top: 4px; width: 100%;
+}
+.tile-progress-fill { height: 100%; border-radius: 2px; background: #3b82f6; transition: width 0.5s ease; }
+
+.added-tag {
+  font-size: 0.7rem; font-weight: 600; color: #16a34a;
+  background: rgba(34,197,94,0.12); border-radius: 4px; padding: 0.15rem 0.4rem;
+}
 </style>

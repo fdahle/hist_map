@@ -7,11 +7,17 @@ services:
       - prod  # Disable production nginx in dev mode; use client-dev instead
 
   server:
+    # Run as the host user so that files in the mounted data directory can be
+    # read, written, and deleted by the server regardless of who created them.
+    # On most Linux systems the first non-root user is UID/GID 1000.
+    user: "1000:1000"
     volumes:
       - ./server/data:/app/server/data
-      # Hot-reload: mount source code over the image
+      # Hot-reload: mount source code over the image.
+      # The anonymous node_modules override is intentionally omitted here so
+      # that npm uses the host's ./server/node_modules (also owned by UID 1000)
+      # instead of the Docker-managed volume that was created as UID 1001.
       - ./server:/app/server
-      - /app/server/node_modules
     environment:
       - NODE_ENV=development
       - CORS_ORIGINS=http://localhost:5173

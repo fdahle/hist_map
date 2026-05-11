@@ -64,15 +64,6 @@
                 </div>
               </div>
             </div>
-            <div v-if="layer.propertySchema && Object.keys(layer.propertySchema).length" class="lim-section">
-              <div class="lim-section-title">Properties ({{ Object.keys(layer.propertySchema).length }})</div>
-              <div class="prop-list">
-                <div v-for="(type, name) in layer.propertySchema" :key="name" class="prop-row">
-                  <span class="prop-name">{{ name }}</span>
-                  <span class="prop-type">{{ type }}</span>
-                </div>
-              </div>
-            </div>
           </template>
 
           <!-- 2. GeoTIFF -->

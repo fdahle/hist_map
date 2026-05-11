@@ -28,10 +28,8 @@
       <button class="banner-close" @click="uploadError = ''">✕</button>
     </div>
 
-    <div v-if="isLoading && !layers.length" class="empty-state">Loading layers…</div>
-    <div v-else-if="!isLoading && !layers.length && !uploadPlaceholders.length" class="empty-state">
-      No 2D layers yet. Click <strong>Add Layer</strong> to upload a GeoJSON or GeoTIFF file.
-    </div>
+    <div v-if="isLoading && !sortedLayers.length" class="empty-state">Loading layers…</div>
+    <div v-else-if="!isLoading && !sortedLayers.length && !uploadPlaceholders.length" class="empty-state">No layers uploaded yet.</div>
 
     <!-- Upload placeholder cards -->
     <div v-if="uploadPlaceholders.length" class="layer-list" style="margin-bottom: 0.5rem;">
@@ -168,7 +166,6 @@
                 <div class="color-row">
                   <input type="color" class="color-swatch"
                     :value="fillSwatchColor(editDraft.fill_color, editDraft.stroke_color)"
-                    :disabled="!fillIsHex(editDraft.fill_color)"
                     @input="editDraft.fill_color = $event.target.value" />
                   <input v-model="editDraft.fill_color" type="text" placeholder="auto / none / #0088ff"
                     @blur="editDraft.fill_color = normalizeFillColor(editDraft.fill_color)" />
@@ -243,29 +240,6 @@
               </div>
             </div>
 
-            <!-- Data preview -->
-            <button class="edit-preview-toggle" @click="toggleDataPreview(layer.id)">
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: dataPreviewOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              {{ dataPreviewOpen ? 'Hide' : 'Show' }} data preview
-              <span v-if="dataPreview" class="edit-field-hint">(first {{ dataPreview.rows.length }} of {{ dataPreview.total }})</span>
-            </button>
-            <div v-if="dataPreviewOpen" class="data-preview-body">
-              <div v-if="dataPreviewLoading" class="data-preview-empty">Loading…</div>
-              <div v-else-if="dataPreviewError" class="data-preview-empty data-preview-error">{{ dataPreviewError }}</div>
-              <div v-else-if="dataPreview && dataPreview.columns.length === 0" class="data-preview-empty">No attributes.</div>
-              <div v-else-if="dataPreview" class="data-preview-scroll">
-                <table class="data-preview-table">
-                  <thead><tr><th v-for="col in dataPreview.columns" :key="col">{{ col }}</th></tr></thead>
-                  <tbody>
-                    <tr v-for="(row, ri) in dataPreview.rows" :key="ri">
-                      <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </template>
 
           <!-- GeoTIFF style -->
@@ -304,6 +278,32 @@
               <textarea v-model="editDraft.notes" rows="2" placeholder="Internal notes, reminders, data source details…" class="edit-textarea"></textarea>
             </div>
           </div>
+
+          <!-- Data preview (GeoJSON only) -->
+          <template v-if="layer.fileType === 'geojson'">
+            <button class="edit-preview-toggle" @click="toggleDataPreview(layer.id)">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: dataPreviewOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              {{ dataPreviewOpen ? 'Hide' : 'Show' }} data preview
+              <span v-if="dataPreview" class="edit-field-hint">(first {{ dataPreview.rows.length }} of {{ dataPreview.total }})</span>
+            </button>
+            <div v-if="dataPreviewOpen" class="data-preview-body">
+              <div v-if="dataPreviewLoading" class="data-preview-empty">Loading…</div>
+              <div v-else-if="dataPreviewError" class="data-preview-empty data-preview-error">{{ dataPreviewError }}</div>
+              <div v-else-if="dataPreview && dataPreview.columns.length === 0" class="data-preview-empty">No attributes.</div>
+              <div v-else-if="dataPreview" class="data-preview-scroll">
+                <table class="data-preview-table">
+                  <thead><tr><th v-for="col in dataPreview.columns" :key="col">{{ col }}</th></tr></thead>
+                  <tbody>
+                    <tr v-for="(row, ri) in dataPreview.rows" :key="ri">
+                      <td v-for="(cell, ci) in row" :key="ci">{{ cell }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </template>
 
           <div class="edit-footer">
             <button v-if="layer.keepOriginal && (draft?.ui?.admin_download ?? true)" class="btn-secondary-sm" @click="onDownloadOriginal(layer)">↓ Original</button>
@@ -388,18 +388,18 @@ const sortedLayers = computed(() =>
 );
 const hasOptimizing = computed(() => layers.value.some(l => l.status === 'optimizing'));
 
-onMounted(async () => { await fetchLayers(); startPolling(); });
+onMounted(async () => { await fetchLayers({ syncDraft: false }); startPolling(); });
 onUnmounted(() => { stopPolling(); clearTimeout(editAutoSaveTimer); });
 
 // ── Fetch & emit to draft ──────────────────────────────────────────────────────
-async function fetchLayers() {
+async function fetchLayers({ syncDraft = true } = {}) {
   if (!authHeader.value) return;
   isLoading.value = true;
   try {
     const res = await fetch(getApiUrl('/admin/layers'), { headers: authHeaders() });
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
     layers.value = await res.json();
-    syncDraftDataLayers();
+    if (syncDraft) syncDraftDataLayers();
   } catch { /* non-fatal */ }
   finally { isLoading.value = false; }
 }
@@ -763,7 +763,7 @@ function normalizeFillColor(val) {
 }
 .banner-close { background: none; border: none; cursor: pointer; color: #ef4444; font-size: 1rem; padding: 0; }
 
-.empty-state { padding: 1.25rem; text-align: center; font-size: 0.85rem; color: var(--admin-muted, #777); background: var(--admin-bg, #f3f4f6); border-radius: 6px; }
+.empty-state { padding: 0.5rem 0; font-size: 0.85rem; color: var(--admin-muted, #888); }
 .layer-list { display: flex; flex-direction: column; gap: 0.5rem; }
 
 .layer-card {

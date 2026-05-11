@@ -7,7 +7,7 @@ self.onmessage = async (e) => {
   const { url, layerId, layerName, featureCount, debug } = e.data;
 
   const log = (msg, ...args) => {
-    if (debug) console.debug(`[Worker - ${layerName}] ${msg}`, ...args);
+    if (debug) console.debug("[Worker - %s] %s", layerName, msg, ...args);
   };
 
   try {
@@ -26,7 +26,7 @@ self.onmessage = async (e) => {
     }
 
   } catch (error) {
-    if (debug) console.debug(`[Worker - ${layerName}] Failed:`, error);
+    if (debug) console.debug("[Worker - %s] Failed:", layerName, error);
     self.postMessage({ type: "ERROR", layerId, error: error.message });
   }
 };
